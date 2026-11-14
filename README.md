@@ -1,6 +1,6 @@
 # tlang
 
-**tlang 1.0.0**
+Version 1.0.0
 
 A small, high-level language that compiles to **very small native Linux binaries**.
 Its compiler, **tcomp**, is written in tlang itself. The same language is used
