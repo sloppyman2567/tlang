@@ -1,0 +1,5 @@
+Build/
+build/
+__pycache__/
+*.pyc
+/taarch64/taarch64

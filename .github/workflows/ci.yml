@@ -1,0 +1,35 @@
+name: ci
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Install binutils
+        run: sudo apt-get update && sudo apt-get install -y binutils
+      - name: Generated files are current
+        run: |
+          python3 Tools/gen_runtime.py --check
+          python3 Tools/gen_kinds.py --check
+          python3 Tools/gen_builtins.py --check
+      - name: Builtin and runtime contracts
+        run: |
+          python3 Tests/builtins_test.py
+          python3 Tests/runtime_test.py
+      - name: Compiler suites
+        run: |
+          python3 Tests/version_test.py
+          python3 Tests/run_tests.py
+          python3 Tests/errors_test.py
+          python3 Tests/sourcemap_test.py
+          python3 Tests/diff_test.py
+          python3 Tests/compare_test.py
+      - name: Bootstrap and fixed point
+        run: Tools/selfhost.sh --verify

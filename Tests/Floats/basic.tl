@@ -1,0 +1,18 @@
+fn main() {
+  print_float(1.5)
+  print("\n")
+  print_float(1 + 0.5)
+  print("\n")
+  print_float(7.0 / 2.0)
+  print("\n")
+  print_float(sqrt(2.0))
+  print("\n")
+  print_int(int(3.9))
+  print("\n")
+  print_float(fabs(-4.25))
+  print("\n")
+  print_float(1e3)
+  print("\n")
+  print_float(2.5e-1)
+  print("\n")
+}
