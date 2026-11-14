@@ -39,6 +39,12 @@ CASES = [
     ("dead code type", 'fn unused() { print_int("s") }\nfn main() { print("hi") }\n',
      "print_int"),
     ("do without while", 'fn main() { do { print("x") } }\n', "while"),
+    ("no main", 'fn f() { }\n', "main"),
+    ("main parameters", 'fn main(a) { }\n', "main"),
+    ("duplicate function", 'fn f() { }\nfn f() { }\nfn main() { }\n', "twice"),
+    ("duplicate global", 'let g = 1\nlet g = 2\nfn main() { }\n', "twice"),
+    ("duplicate struct", 'struct S { a }\nstruct S { b }\nfn main() { }\n', "twice"),
+    ("unknown function", 'fn main() { mystery(1) }\n', "unknown function"),
 ]
 
 

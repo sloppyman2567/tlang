@@ -8,7 +8,7 @@
 #   as --64 -mx86-used-note=no -o FILE.o FILE.s
 #   ld -s -z noseparate-code --build-id=none -o FILE FILE.o
 
-let TLANG_VERSION = "1.0.0"
+let TLANG_VERSION = "1.1.0"
 
 # ---------------------------------------------------------------- token kinds
 let TK_EOF = 0
@@ -132,6 +132,12 @@ let FN_NPARAM = alloc(4000)
 let FN_PTYPE = alloc(24000, str)
 let NPARAM = 0
 
+# Call sites, checked once every definition has been parsed.
+let NCALLED = 0
+let CALLED_NAME = alloc(20000, str)
+let CALLED_POS = alloc(20000)
+let CALLED_LINE = alloc(20000)
+
 # code generation state
 let SLOT = 0
 let TS = 256
@@ -190,6 +196,7 @@ let U_APPENDFILE = 0
 let U_FILEEXISTS = 0
 let U_STROFFSET = 0
 let U_STRDIFF = 0
+let U_BOUNDS = 0
 
 # ---------------------------------------------------------------- output helpers
 # The emitter writes one line at a time, but a comparison that feeds a branch is
@@ -1536,6 +1543,16 @@ fn fn_find(name: str) -> int {
   return -1
 }
 
+fn note_call(name: str, p: int, ln: int) {
+  if NCALLED >= 20000 {
+    err_at("too many function calls", p, ln)
+  }
+  CALLED_NAME[NCALLED] = name
+  CALLED_POS[NCALLED] = p
+  CALLED_LINE[NCALLED] = ln
+  NCALLED = NCALLED + 1
+}
+
 fn fn_ret(name: str) -> str {
   let i = fn_find(name)
   if i < 0 {
@@ -1876,7 +1893,7 @@ fn emit_bin(op: int, lt: str) {
     } else {
       el("  sub rax, rcx")
     }
-    GTYPE = lt
+    GTYPE = "ptr"
     return
   }
   if op == TK_PLUS && (lt == "" || lt == "int") && is_ptr_type(GTYPE) == 1 {
@@ -1885,7 +1902,7 @@ fn emit_bin(op: int, lt: str) {
     el("  pop rax")
     el("  shl rax, 3")
     el("  add rax, rcx")
-    GTYPE = rt
+    GTYPE = "ptr"
     return
   }
   if op == TK_MINUS && is_ptr_type(lt) == 1 && is_ptr_type(GTYPE) == 1 {
@@ -2063,6 +2080,32 @@ fn emit_float_bin(op: int, lt: str) {
   err("unknown float operator")
 }
 
+fn emit_index_check_array() {
+  let bad = newl()
+  let good = newl()
+  el("  test rcx, rcx")
+  el("  js " + bad)
+  el("  mov r8, [rax - 8]")
+  el("  cmp rcx, r8")
+  el("  jb " + good)
+  el(bad + ":")
+  el("  call __t_bounds_fail")
+  U_BOUNDS = 1
+  el(good + ":")
+}
+
+# Strings have no length header, so only the lower bound is checked: an
+# upper-bound check would need a strlen on every byte access, and writing at
+# strlen(s) is how NUL-terminated buffers grow.
+fn emit_index_check_string() {
+  let good = newl()
+  el("  test rcx, rcx")
+  el("  jns " + good)
+  el("  call __t_bounds_fail")
+  U_BOUNDS = 1
+  el(good + ":")
+}
+
 fn parse_unary() {
   if cur_is(TK_MINUS) == 1 {
     adv()
@@ -2113,14 +2156,19 @@ fn parse_postfix() {
       el("  mov rcx, rax")
       el("  pop rax")
       if bt == "str" {
+        emit_index_check_string()
         el("  movzx rax, byte ptr [rax + rcx]")
         GTYPE = "int"
-      } else if has_arr_prefix(bt) == 1 {
-        el("  mov rax, [rax + rcx*8]")
-        GTYPE = elem_of(bt)
       } else {
+        if bt == "arr" || has_arr_prefix(bt) == 1 {
+          emit_index_check_array()
+        }
         el("  mov rax, [rax + rcx*8]")
-        GTYPE = "int"
+        if has_arr_prefix(bt) == 1 {
+          GTYPE = elem_of(bt)
+        } else {
+          GTYPE = "int"
+        }
       }
       expect(TK_RBRACKET)
     } else if cur_is(TK_DOT) == 1 {
@@ -2192,9 +2240,11 @@ fn parse_primary() {
   }
   if cur_is(TK_IDENT) == 1 {
     let name = TV[TI]
+    let namepos = TP[TI]
+    let nameline = TL[TI]
     adv()
     if cur_is(TK_LPAREN) == 1 {
-      parse_call(name)
+      parse_call(name, namepos, nameline)
       return
     }
     if lookup(name) == 0 {
@@ -2292,7 +2342,7 @@ fn call_reg(i: int) -> str {
   return "r9"
 }
 
-fn parse_call(name: str) {
+fn parse_call(name: str, namepos: int, nameline: int) {
   if struct_find(name) >= 0 {
     parse_construct(name)
     return
@@ -2303,6 +2353,7 @@ fn parse_call(name: str) {
     return
   }
   let fi = fn_find(name)
+  note_call(name, namepos, nameline)
   adv()
   let n = 0
   while cur_is(TK_RPAREN) == 0 {
@@ -2572,7 +2623,7 @@ fn parse_builtin(name: str, kind: int) {
     el("  mov rdi, " + loc(t))
     el("  call __t_alloc")
     U_ALLOC = 1
-    GTYPE = "ptr"
+    GTYPE = "arr"
     return
   }
   if kind == 12 {
@@ -3233,7 +3284,7 @@ fn parse_assign() {
         el("  sub rax, rcx")
       }
       st(s)
-      set_type(name, t)
+      set_type(name, "ptr")
       return
     }
     if t == "float" || GTYPE == "float" {
@@ -3330,8 +3381,12 @@ fn parse_assign() {
     el("  pop rcx")
     el("  pop rax")
     if t == "str" {
+      emit_index_check_string()
       el("  mov byte ptr [rax + rcx], dl")
     } else {
+      if t == "arr" || has_arr_prefix(t) == 1 {
+        emit_index_check_array()
+      }
       el("  mov [rax + rcx*8], rdx")
     }
     return
@@ -3543,6 +3598,9 @@ fn parse_return() {
 fn parse_struct() {
   adv()
   let name = TV[TI]
+  if struct_find(name) >= 0 {
+    err("struct '" + name + "' is defined twice")
+  }
   adv()
   expect(TK_LBRACE)
   if NSTRUCT >= 1000 {
@@ -3596,6 +3654,9 @@ fn fn_enter(name: str, np: int) {
 fn parse_fn() {
   adv()
   let name = TV[TI]
+  if fn_find(name) >= 0 {
+    err("function '" + name + "' is defined twice")
+  }
   adv()
   expect(TK_LPAREN)
   if NFN >= 4000 {
@@ -3671,6 +3732,9 @@ fn parse_fn() {
 fn parse_global() {
   adv()
   let name = TV[TI]
+  if lookup(name) == 1 {
+    err("global '" + name + "' is defined twice")
+  }
   adv()
   expect(TK_ASSIGN)
   let g = NGLOB
@@ -3705,6 +3769,20 @@ fn compile_program() {
     } else {
       err("expected fn, struct or let")
     }
+  }
+  let mi = fn_find("main")
+  if mi < 0 {
+    err("program needs a 'fn main()'")
+  }
+  if FN_NPARAM[mi] != 0 {
+    err("'main' takes no parameters")
+  }
+  let ci = 0
+  while ci < NCALLED {
+    if fn_find(CALLED_NAME[ci]) < 0 {
+      err_at("unknown function '" + CALLED_NAME[ci] + "'", CALLED_POS[ci], CALLED_LINE[ci])
+    }
+    ci = ci + 1
   }
 }
 
@@ -3746,6 +3824,16 @@ fn emit_data() {
   el("__t_oom_msg:")
   el("  .ascii \"tlang: out of memory\"")
   el("  .byte 10")
+  if U_ALLOC == 1 {
+    el("__t_bad_alloc_msg:")
+    el("  .ascii \"tlang: invalid allocation size\"")
+    el("  .byte 10")
+  }
+  if U_BOUNDS == 1 {
+    el("__t_oob_msg:")
+    el("  .ascii \"tlang: index out of bounds\"")
+    el("  .byte 10")
+  }
   let i = 1
   while i <= NSTR {
     el("S" + i + ":")
@@ -3803,6 +3891,9 @@ fn need_alloc() -> int {
 }
 
 fn emit_runtime() {
+  if U_SLICE == 1 || U_CONCAT == 1 {
+    U_BOUNDS = 1
+  }
   if need_strlen() == 1 {
     rt_emit_strlen()
   }
@@ -3819,7 +3910,11 @@ fn emit_runtime() {
     rt_emit_print_char()
   }
   if need_alloc() == 1 {
+    U_ALLOC = 1
     rt_emit_alloc()
+  }
+  if U_BOUNDS == 1 {
+    rt_emit_bounds_fail()
   }
   if U_APPEND == 1 {
     rt_emit_append()

@@ -117,10 +117,10 @@ def infer_expr_kind(node, scope, ctx):
             return STR
         if (node.op in ("+", "-") and right == INT
                 and is_pointer_kind(left, ctx.structs)):
-            return left
+            return PTR
         if (node.op == "+" and left == INT
                 and is_pointer_kind(right, ctx.structs)):
-            return right
+            return PTR
         if (node.op == "-" and is_pointer_kind(left, ctx.structs)
                 and is_pointer_kind(right, ctx.structs)):
             return INT
@@ -142,6 +142,8 @@ def infer_expr_kind(node, scope, ctx):
                 and (node.args[1].name in ctx.structs
                      or node.args[1].name in (INT, STR, FLOAT))):
             return "arr_of:" + node.args[1].name
+        if node.name == "alloc" and len(node.args) == 1:
+            return ARR
         if node.name == "float":
             return FLOAT
         if node.name == "int":
@@ -572,8 +574,10 @@ class Lowerer:
             idx = self.expr(target.idx)
             v = self.expr(node.expr)
             if base.kind == STR:
+                self.check_string_index(idx)
                 self.emit("stb", base.slot, idx.slot, v.slot)
             else:
+                self.check_array_index(base, idx)
                 self.emit("st8", base.slot, idx.slot, v.slot)
         elif isinstance(target, A.Field):
             base = self.expr(target.base)
@@ -596,6 +600,45 @@ class Lowerer:
 
     def field_kind(self, base_kind, field):
         return self.ctx.field_kinds.get(base_kind, {}).get(field, UNKNOWN)
+
+    def check_array_index(self, base, idx):
+        """Abort before an out-of-range array access.
+
+        Arrays carry their length in the header, so this is a load and two
+        branches. Interior pointers have no header and stay unchecked; they
+        are represented by PTR, while whole arrays are ARR/arr_of.
+        """
+        if not (base.kind == ARR or base.kind.startswith("arr_of:")):
+            return
+        self.use("__t_bounds_fail")
+        bad = self.label()
+        good = self.label()
+        neg_one = self.temp()
+        self.emit("imm", neg_one, -1)
+        length = self.temp()
+        self.emit("ld8", length, base.slot, neg_one)
+        self.emit("jcck", "lt", idx.slot, 0, bad)
+        self.emit("jcc", "lt", idx.slot, length, good)
+        self.emit("lab", bad)
+        unused = self.temp()
+        self.emit("bcall", unused, "__t_bounds_fail", ())
+        self.emit("lab", good)
+
+    def check_string_index(self, idx):
+        """Abort on a negative string index.
+
+        Strings carry no length, so the upper bound would need a strlen on
+        every access, which is too slow for byte-at-a-time scanning. The lower
+        bound costs one branch and catches reads and writes before the buffer.
+        Writing at `strlen(s)` is how a NUL-terminated buffer grows, so the
+        upper bound must stay open anyway.
+        """
+        self.use("__t_bounds_fail")
+        good = self.label()
+        self.emit("jcck", "ge", idx.slot, 0, good)
+        unused = self.temp()
+        self.emit("bcall", unused, "__t_bounds_fail", ())
+        self.emit("lab", good)
 
     # -- expressions ------------------------------------------------------
     def expr(self, node):
@@ -729,7 +772,9 @@ class Lowerer:
         self.emit("bin", "mul", scaled, index.slot, eight)
         t = self.temp()
         self.emit("bin", "add" if sign > 0 else "sub", t, ptr.slot, scaled)
-        return Val(t, ptr.kind)
+        # The result may point inside an allocation, so it has no header and
+        # cannot be bounds-checked as a whole array.
+        return Val(t, PTR)
 
     def as_float(self, val, node):
         if val.kind == FLOAT:
@@ -935,6 +980,8 @@ class Lowerer:
             t = self.temp()
             self.use(symbol)
             self.emit("bcall", t, symbol, tuple(a.slot for a in args))
+            if name == "alloc":
+                return Val(t, ARR)
             return Val(t, kind)
 
         self.error(f"unknown function '{name}'", node)
@@ -944,10 +991,12 @@ class Lowerer:
         idx = self.expr(node.idx)
         t = self.temp()
         if base.kind == STR:
+            self.check_string_index(idx)
             self.emit("ldb", t, base.slot, idx.slot)
             return Val(t, INT)
         if base.kind in self.ctx.structs:
             self.error(f"cannot index struct '{base.kind}'", node)
+        self.check_array_index(base, idx)
         self.emit("ld8", t, base.slot, idx.slot)
         if base.kind.startswith("arr_of:"):
             return Val(t, base.kind[len("arr_of:"):])
@@ -1032,7 +1081,7 @@ def lower_program(program, filename="<input>", opt=True):
         funcs[fn.name] = fn
 
     if "main" not in funcs:
-        raise TlangError("program needs a 'fn main()'", filename)
+        raise TlangError("program needs a 'fn main()'", filename, 1, 1)
     if funcs["main"].params:
         raise TlangError("'main' takes no parameters", filename,
                          funcs["main"].line, funcs["main"].col)

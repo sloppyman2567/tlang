@@ -31,5 +31,7 @@ jobs:
           python3 Tests/sourcemap_test.py
           python3 Tests/diff_test.py
           python3 Tests/compare_test.py
+      - name: Memory safety
+        run: python3 Tests/bounds_test.py
       - name: Bootstrap and fixed point
         run: Tools/selfhost.sh --verify

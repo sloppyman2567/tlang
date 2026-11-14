@@ -7,7 +7,10 @@ I/O code at all.  All of it runs on raw Linux syscalls; there is no libc.
 from .builtins_gen import BUILTINS
 
 ARENA_SIZE = 64 * 1024 * 1024
+MAX_ALLOC = (ARENA_SIZE - 16) // 8
 OOM_MSG = "tlang: out of memory\n"
+OOB_MSG = "tlang: index out of bounds\n"
+BAD_ALLOC_MSG = "tlang: invalid allocation size\n"
 
 # name -> (assembly body, dependencies)
 RUNTIME = {
@@ -113,7 +116,12 @@ RUNTIME = {
         # Every block carries a 16-byte header: capacity and length, both in
         # 8-byte slots.  `alloc` starts full -- n zeroed elements -- and
         # `__t_append` grows by reallocating when the length reaches capacity.
+        # Reject negative or overflowing counts before scaling by eight.
         """__t_alloc:
+  test rdi, rdi
+  js .Lt_alloc_bad
+  cmp rdi, %d
+  ja .Lt_alloc_oom
   mov rcx, [rip + __t_arena_pos]
   lea rax, [rip + __t_arena]
   add rax, rcx
@@ -142,7 +150,28 @@ RUNTIME = {
   syscall
   mov eax, 60
   mov edi, 1
-  syscall""" % (ARENA_SIZE, len(OOM_MSG)),
+  syscall
+.Lt_alloc_bad:
+  lea rsi, [rip + __t_bad_alloc_msg]
+  mov edx, %d
+  mov eax, 1
+  mov edi, 2
+  syscall
+  mov eax, 60
+  mov edi, 134
+  syscall""" % (MAX_ALLOC, ARENA_SIZE, len(OOM_MSG), len(BAD_ALLOC_MSG)),
+        [],
+    ),
+    "bounds_fail": (
+        """__t_bounds_fail:
+  lea rsi, [rip + __t_oob_msg]
+  mov edx, %d
+  mov eax, 1
+  mov edi, 2
+  syscall
+  mov eax, 60
+  mov edi, 134
+  syscall""" % len(OOB_MSG),
         [],
     ),
     "alen": (
@@ -451,7 +480,9 @@ RUNTIME = {
   mov rdi, r14
   call __t_strlen
   mov r13, rax
-  lea rdx, [r12 + r13]
+  mov rdx, r12
+  add rdx, r13
+  jc .Lt_cc_bad
   push rdx
   lea rdi, [rdx + 8]
   shr rdi, 3
@@ -482,18 +513,31 @@ RUNTIME = {
   pop r13
   pop r12
   pop rbx
-  ret""",
-        ["strlen", "alloc"],
+  ret
+.Lt_cc_bad:
+  call __t_bounds_fail""",
+        ["strlen", "alloc", "bounds_fail"],
     ),
     "slice": (
         """__t_slice:
   push rbx
   push r12
   push r13
+  push r14
   mov rbx, rdi
   mov r12, rsi
   mov r13, rdx
-  lea rdi, [rdx + 8]
+  test r12, r12
+  js .Lt_sl_bad
+  test r13, r13
+  js .Lt_sl_bad
+  mov r14, r12
+  add r14, r13
+  jc .Lt_sl_bad
+  call __t_strlen
+  cmp r14, rax
+  ja .Lt_sl_bad
+  lea rdi, [r13 + 8]
   shr rdi, 3
   call __t_alloc
   add rbx, r12
@@ -507,11 +551,14 @@ RUNTIME = {
   jmp .Lt_sl_loop
 .Lt_sl_done:
   mov byte ptr [rax + r13], 0
+  pop r14
   pop r13
   pop r12
   pop rbx
-  ret""",
-        ["alloc"],
+  ret
+.Lt_sl_bad:
+  call __t_bounds_fail""",
+        ["alloc", "strlen", "bounds_fail"],
     ),
     "str_eq": (
         """__t_str_eq:
@@ -1170,8 +1217,16 @@ RUNTIME = {
     ),
     "argv": (
         """__t_argv:
+  test rdi, rdi
+  js .Lt_av_none
+  mov rax, [rip + __t_argc_val]
+  cmp rdi, rax
+  jae .Lt_av_none
   mov rax, [rip + __t_argv_val]
   mov rax, [rax + rdi*8]
+  ret
+.Lt_av_none:
+  lea rax, [rip + __t_empty]
   ret""",
         ["args"],
     ),

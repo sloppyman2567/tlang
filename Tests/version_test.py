@@ -4,6 +4,9 @@
 Stage 0 reads Bootstrap.__version__; the self-hosted compiler reads the
 TLANG_VERSION constant in tcomp.tl.  They must agree, and both CLI spellings
 must report the same value.  Tools/selfhost.py checks the generated stages too.
+
+The expected version is derived from Bootstrap.__version__, so a release bump
+only edits Bootstrap/__init__.py and tcomp.tl, not this file.
 """
 
 import os
@@ -18,15 +21,14 @@ from Bootstrap import __version__  # noqa: E402
 
 TCOMP = os.path.join(ROOT, "tcomp")
 SOURCE = os.path.join(ROOT, "tcomp.tl")
-WANT = "tcomp 1.0.0"
+WANT = f"tcomp {__version__}"
 
 
 def main():
     failures = []
-    if __version__ != "1.0.0":
-        failures.append(f"Bootstrap.__version__ is {__version__!r}, expected '1.0.0'")
-    if WANT != f"tcomp {__version__}":
-        failures.append(f"version contract is inconsistent: {WANT!r}")
+    if re.fullmatch(r"\d+\.\d+\.\d+", __version__) is None:
+        failures.append(
+            f"Bootstrap.__version__ is {__version__!r}, expected MAJOR.MINOR.PATCH")
 
     source = open(SOURCE, encoding="utf-8").read()
     match = re.search(r'let TLANG_VERSION = "([^"]+)"', source)

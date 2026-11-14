@@ -12,7 +12,7 @@ from .emit import (
 )
 from .ir import TEMP_BASE
 from .opt import peephole
-from .runtime import BSS, OOM_MSG, resolve_used
+from .runtime import BAD_ALLOC_MSG, BSS, OOB_MSG, OOM_MSG, resolve_used
 
 
 def slot_mem(fn, slot):
@@ -351,6 +351,12 @@ def compile_module(module):
     if "__t_oom_msg" in used:
         lines.append("__t_oom_msg:")
         lines.append('  .ascii "%s"' % OOM_MSG.replace("\n", "\\n"))
+    if "__t_bad_alloc_msg" in used:
+        lines.append("__t_bad_alloc_msg:")
+        lines.append('  .ascii "%s"' % BAD_ALLOC_MSG.replace("\n", "\\n"))
+    if "__t_oob_msg" in used:
+        lines.append("__t_oob_msg:")
+        lines.append('  .ascii "%s"' % OOB_MSG.replace("\n", "\\n"))
     for name, data in module.strings.items():
         lines.append(f"{name}:")
         lines.append(f'  .ascii "{escape_bytes(data)}"')

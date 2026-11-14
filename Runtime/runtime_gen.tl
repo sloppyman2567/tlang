@@ -101,6 +101,10 @@ fn rt_emit_print_int() {
 
 fn rt_emit_alloc() {
   el("__t_alloc:")
+  el("  test rdi, rdi")
+  el("  js .Lt_alloc_bad")
+  el("  cmp rdi, 8388606")
+  el("  ja .Lt_alloc_oom")
   el("  mov rcx, [rip + __t_arena_pos]")
   el("  lea rax, [rip + __t_arena]")
   el("  add rax, rcx")
@@ -129,6 +133,27 @@ fn rt_emit_alloc() {
   el("  syscall")
   el("  mov eax, 60")
   el("  mov edi, 1")
+  el("  syscall")
+  el(".Lt_alloc_bad:")
+  el("  lea rsi, [rip + __t_bad_alloc_msg]")
+  el("  mov edx, 31")
+  el("  mov eax, 1")
+  el("  mov edi, 2")
+  el("  syscall")
+  el("  mov eax, 60")
+  el("  mov edi, 134")
+  el("  syscall")
+}
+
+fn rt_emit_bounds_fail() {
+  el("__t_bounds_fail:")
+  el("  lea rsi, [rip + __t_oob_msg]")
+  el("  mov edx, 27")
+  el("  mov eax, 1")
+  el("  mov edi, 2")
+  el("  syscall")
+  el("  mov eax, 60")
+  el("  mov edi, 134")
   el("  syscall")
 }
 
@@ -428,7 +453,9 @@ fn rt_emit_concat() {
   el("  mov rdi, r14")
   el("  call __t_strlen")
   el("  mov r13, rax")
-  el("  lea rdx, [r12 + r13]")
+  el("  mov rdx, r12")
+  el("  add rdx, r13")
+  el("  jc .Lt_cc_bad")
   el("  push rdx")
   el("  lea rdi, [rdx + 8]")
   el("  shr rdi, 3")
@@ -460,6 +487,8 @@ fn rt_emit_concat() {
   el("  pop r12")
   el("  pop rbx")
   el("  ret")
+  el(".Lt_cc_bad:")
+  el("  call __t_bounds_fail")
 }
 
 fn rt_emit_slice() {
@@ -467,10 +496,21 @@ fn rt_emit_slice() {
   el("  push rbx")
   el("  push r12")
   el("  push r13")
+  el("  push r14")
   el("  mov rbx, rdi")
   el("  mov r12, rsi")
   el("  mov r13, rdx")
-  el("  lea rdi, [rdx + 8]")
+  el("  test r12, r12")
+  el("  js .Lt_sl_bad")
+  el("  test r13, r13")
+  el("  js .Lt_sl_bad")
+  el("  mov r14, r12")
+  el("  add r14, r13")
+  el("  jc .Lt_sl_bad")
+  el("  call __t_strlen")
+  el("  cmp r14, rax")
+  el("  ja .Lt_sl_bad")
+  el("  lea rdi, [r13 + 8]")
   el("  shr rdi, 3")
   el("  call __t_alloc")
   el("  add rbx, r12")
@@ -484,10 +524,13 @@ fn rt_emit_slice() {
   el("  jmp .Lt_sl_loop")
   el(".Lt_sl_done:")
   el("  mov byte ptr [rax + r13], 0")
+  el("  pop r14")
   el("  pop r13")
   el("  pop r12")
   el("  pop rbx")
   el("  ret")
+  el(".Lt_sl_bad:")
+  el("  call __t_bounds_fail")
 }
 
 fn rt_emit_str_eq() {
@@ -1129,8 +1172,16 @@ fn rt_emit_argc() {
 
 fn rt_emit_argv() {
   el("__t_argv:")
+  el("  test rdi, rdi")
+  el("  js .Lt_av_none")
+  el("  mov rax, [rip + __t_argc_val]")
+  el("  cmp rdi, rax")
+  el("  jae .Lt_av_none")
   el("  mov rax, [rip + __t_argv_val]")
   el("  mov rax, [rax + rdi*8]")
+  el("  ret")
+  el(".Lt_av_none:")
+  el("  lea rax, [rip + __t_empty]")
   el("  ret")
 }
 

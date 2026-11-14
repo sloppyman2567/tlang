@@ -1,6 +1,6 @@
 # tlang
 
-Version 1.0.0
+Version 1.1.0 — see [CHANGELOG.md](CHANGELOG.md) for release notes.
 
 A small, high-level language that compiles to **very small native Linux binaries**.
 Its compiler, **tcomp**, is written in tlang itself. The same language is used
@@ -32,16 +32,17 @@ Measured on x86-64 Linux with binutils 2.47:
 | fib (recursion, 10 calls) | 602 B | 669 B |
 | fizzbuzz (20 lines of output, branches) | 749 B | 790 B |
 | primes, first 20 (functions, loops, calls) | 692 B | 826 B |
-| words (stdin, `read_file`, `argv`) | 1,579 B | 1,717 B |
-| **tbox** (four tools: `wc`, `head`, `tail`, `grep`) | **7,092 B** | — |
-| **tjson** (JSON validate, format, query) | 13,327 B | — |
-| **tbf** (Brainfuck interpreter) | 3,612 B | — |
-| tcomp, the whole compiler | 106,157 B | — |
+| words (stdin, `read_file`, `argv`) | 1,789 B | 1,911 B |
+| **tbox** (four tools: `wc`, `head`, `tail`, `grep`) | **8,741 B** | — |
+| **tjson** (JSON validate, format, query) | 16,059 B | — |
+| **tbf** (Brainfuck interpreter) | 5,198 B | — |
+| tcomp, the whole compiler | 113,623 B | — |
 | *for comparison:* hello world in C, `gcc -Os -s` | 14,472 B | — |
 | *for comparison:* `grep` + `wc` + `head` + `tail` from coreutils | 437 KB | — |
 
-Timings are wall-clock `tcomp build tcomp.tl --asm` on a development machine
-(code generation only, without assembling or linking).
+Sizes include the default bounds checks. Timings are wall-clock
+`tcomp build tcomp.tl --asm` on a development machine (code generation only,
+without assembling or linking); the timing figures below predate those checks.
 
 Hello world is **44× smaller than the C equivalent**, and an empty `main` is
 **256 B** — 232 of which are the ELF header and three program headers. On a
@@ -62,7 +63,7 @@ syscalls and `ld` writes a single read/execute segment.
 ## Quick start
 
 ```bash
-./tcomp --version                       # tcomp 1.0.0
+./tcomp --version                       # tcomp 1.1.0
 ./tcomp run Examples/hello.tl           # compile and run
 ./tcomp build Examples/hello.tl         # -> ./hello
 ./tcomp build Examples/hello.tl --asm   # show the generated assembly
@@ -84,12 +85,12 @@ Tools/selfhost.sh --verify     # builds Build/tcomp and proves the fixed point
 
 ```
 stage 1: tcomp.tl -> Build/tcomp0 (via stage 0)
-  Build/tcomp0: 141440 bytes
+  Build/tcomp0: 158648 bytes
 stage 2: tcomp.tl -> Build/tcomp (via stage 1)
-  Build/tcomp: 106157 bytes
+  Build/tcomp: 113623 bytes
 stage 3: tcomp.tl -> Build/tcomp2 (via stage 2)
 stage 4: tcomp.tl -> Build/tcomp3 (via stage 3)
-fixed point: stage 2 and stage 3 are identical (106157 bytes)
+fixed point: stage 2 and stage 3 are identical (113623 bytes)
 ```
 
 `Build/tcomp` emits assembly on stdout:
@@ -211,7 +212,8 @@ fn repeat(s: str, n: int) -> str {
 ```
 
 `main` takes no parameters. Its return value (or falling off its end, which
-returns `0`) becomes the process exit status.
+returns `0`) becomes the process exit status. A program needs one `fn main()
+{ }`, and defining a function, global or struct twice is a compile error.
 
 Calls are checked against the annotations in both compilers: a string passed
 to an `int` parameter, a string returned from an `int` function, or
@@ -476,11 +478,11 @@ with the self-hosted compiler as well as stage 0.
 
 | Program | Size | |
 |---|---|---|
-| `Programs/tbox.tl` | 7,092 B | `wc`, `head`, `tail`, `grep` in one binary |
-| `Programs/tjson.tl` | 13,327 B | JSON validate / pretty-print / query |
-| `Programs/tbf.tl` | 3,612 B | a Brainfuck interpreter — a real bytecode VM |
-| `Programs/tchip8.tl` | 24,066 B | a CHIP-8 interpreter with terminal and X11 displays |
-| `Programs/tgameboy.tl` | 42,265 B | a Game Boy DMG CPU, joypad and background PPU |
+| `Programs/tbox.tl` | 8,741 B | `wc`, `head`, `tail`, `grep` in one binary |
+| `Programs/tjson.tl` | 16,059 B | JSON validate / pretty-print / query |
+| `Programs/tbf.tl` | 5,198 B | a Brainfuck interpreter — a real bytecode VM |
+| `Programs/tchip8.tl` | 31,316 B | a CHIP-8 interpreter with terminal and X11 displays |
+| `Programs/tgameboy.tl` | 46,419 B | a Game Boy DMG CPU, joypad and background PPU |
 
 ### tbox — four tools, one binary
 
@@ -502,7 +504,7 @@ No file argument means stdin, and `grep` keeps the shell contract: exit 0 when
 it matched, 1 when it did not, 2 on a usage error. On a 3.4 MB text file `tbox
 grep -c` returns the same count as GNU grep in 25 ms (GNU grep: 5 ms).
 
-It is 62× smaller than the four coreutils binaries it replaces (437 KB), and
+It is 50× smaller than the four coreutils binaries it replaces (437 KB), and
 the test suite compares its output against theirs byte for byte. A hosted C
 equivalent of the same four tools lives in `Programs/tbox.c`; it follows
 tbox.tl's output and exit behavior, but is not part of the tcomp build.
@@ -557,7 +559,7 @@ over that string plus a **precomputed jump table**: scanning forward to the
 matching bracket on every loop iteration would make any loop O(n²). Building
 the table is one pass with a stack, after which `[` and `]` are a single array
 load. That is the same shape as a real bytecode interpreter — dispatch on an
-opcode, an operand stack (here a 30,000-cell tape), a branch table — in 3.6 KB.
+opcode, an operand stack (here a 30,000-cell tape), a branch table — in 5.0 KB.
 `[-]` and `[+]` collapse to a single store instead of up to 255 iterations
 (35× faster on a clear-loop-heavy program), and a program larger than the
 64 KB jump table is rejected instead of writing past it.
@@ -716,7 +718,7 @@ it cannot preserve, because a silent semantic change is worse than an error.
 `gcc -O1`, once through the translator, and then rebuilds each translation with
 the self-hosted compiler. All three must agree on stdout and exit status.
 **16 programs, byte-identical output; 256,816 B of gcc binaries against
-16,896 B of tlang (15.2×).**
+19,621 B of tlang (13.1×).**
 
 | C | tlang |
 |---|---|
@@ -890,7 +892,7 @@ output.
 ## Tests
 
 ```bash
-python3 Tests/version_test.py   # stage 0 and tcomp.tl report tcomp 1.0.0
+python3 Tests/version_test.py   # stage 0 and tcomp.tl report tcomp 1.1.0
 python3 Tests/run_tests.py      # golden output + exit status + binary size
 python3 Tests/diff_test.py      # optimizer must not change behaviour
 python3 Tests/programs_test.py  # tbox, against real arguments and real grep
@@ -902,6 +904,7 @@ python3 Tests/runtime_test.py   # runtime dependency closure and assembly
 python3 Tests/errors_test.py    # both compilers must reject bad programs
 python3 Tests/compare_test.py   # stage 0 and self-hosted compiler must agree
 python3 Tests/sourcemap_test.py # imported-file errors name the imported file
+python3 Tests/bounds_test.py    # checked indexing and runtime safety guards
 python3 Tests/io_test.py        # file output and the no-print dependency
 python3 Tests/modules_test.py   # recursive imports through both compilers
 python3 Tests/wayland_test.py   # Wayland input against a fake compositor
@@ -942,6 +945,7 @@ remains about 2.5× faster than stage 0 for this recurrence.
 ```
 tcomp                 CLI: build / run / --asm / --ir / version
 tcomp.tl              the compiler, in tlang
+CHANGELOG.md          release notes for each version
 Bootstrap/            stage-0 compiler (Python)
   lexer.py parser.py ast_nodes.py lower.py ir.py optir.py isa.py emit.py
   opt.py runtime.py elf.py driver.py cli.py errors.py kindrules_gen.py
@@ -969,6 +973,7 @@ Tests/runtime_test.py runtime dependency closure and assembly
 Tests/errors_test.py  programs both compilers are expected to reject
 Tests/compare_test.py stage 0 vs self-hosted differential test
 Tests/sourcemap_test.py imported-file diagnostics name the imported file
+Tests/bounds_test.py  checked indexing and runtime safety guards
 Tests/io_test.py      file output and self-hosted dependency checks
 Tests/modules_test.py recursive import behaviour in both compilers
 Tests/wayland_test.py twayland keyboard/pointer events against a fake compositor
@@ -991,7 +996,14 @@ taarch64/             user-mode AArch64 interpreter for static binaries
 
 ## Known limitations
 
-* No bounds checking on arrays or struct fields; out-of-range access is UB.
+* Array indexing is bounds-checked at runtime: a bad index writes
+  `tlang: index out of bounds` to stderr and exits with status 134. String
+  indices are checked for negatives; their upper bound is open because strings
+  carry no length and writing at `strlen(s)` is how a NUL-terminated buffer
+  grows. Raw/interior pointer arithmetic and struct fields remain unchecked
+  (struct fields are fixed compile-time offsets).
+* `alloc` rejects negative or oversized counts, and `slice` rejects ranges
+  outside its source string. Out-of-range `argv` returns `""`.
 * Strings and arrays are arena-allocated. Individual blocks are never freed;
   `arena_mark()`/`arena_release(mark)` can rewind to an earlier allocation
   point. The 64 MB arena exits with a message when exhausted. Every allocation
