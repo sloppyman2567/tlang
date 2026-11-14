@@ -683,20 +683,35 @@ and a byte-exact 23,184-byte PPU frame; all pass in both compilers.
 `taarch64/` is a separate project written in tlang: a user-mode AArch64
 interpreter for small static Linux binaries. It loads an `ET_EXEC` image into a
 flat 16 MiB guest address space, executes the scalar integer A64 subset that
-`gcc -O2` emits for freestanding C (plus the 128-bit `ldr q`/`str q` copies it
-uses for small blocks), and translates `svc #0` calls onto the host.
-`qemu-aarch64` is the reference used to check new instruction coverage.
+`gcc -O2` emits for C (plus the exclusive loads and SIMD moves libc needs), and
+translates `svc #0` calls onto the host. `qemu-aarch64` is the reference used to
+check new instruction and syscall coverage.
 
 ```bash
 ./taarch64/build.sh
+
+# freestanding guest
 aarch64-linux-gnu-gcc -static -nostdlib -O2 -o hello.a64 hello.c
 ./taarch64/taarch64 hello.a64          # hello, aarch64
+
+# ordinary static musl guest
+aarch64-linux-musl-gcc -static -o hello.musl hello.c
+./taarch64/taarch64 hello.musl         # hello, musl!
 ```
 
-Dynamic binaries are rejected at load time; a fully static glibc binary stops
-on a NEON instruction the interpreter does not implement. Instruction and
+A static musl binary runs unmodified: the interpreter builds a real Linux
+startup stack (`argc`/`argv`/`envp`/auxv, including `AT_PHDR` and `AT_RANDOM`),
+implements `TPIDR_EL0` so libc can install its TLS, and serves `writev`,
+`ioctl`, `malloc`'s `brk`/`mmap` and the rest of the calls libc makes. Dynamic
+binaries are rejected at load time; a static glibc binary stops on a SIMD
+arithmetic instruction the interpreter does not implement. Instruction and
 syscall coverage, the memory model, build options and limitations are in
 [`taarch64/README.md`](taarch64/README.md).
+
+Both compiler stages build it: `./taarch64/build.sh --selfhost` produces the
+interpreter with `Build/tcomp`, and that build runs the same musl guests. It is
+the first tlang program to run a musl AArch64 binary under emulation, compiled
+by tlang itself.
 
 ---
 

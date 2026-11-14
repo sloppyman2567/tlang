@@ -37,6 +37,12 @@ let BRK = 0         # program break, and the bump pointer for mmap
 let HEAP_LIMIT = MEM_TOP - 0x100000
 let STACK_TOP = MEM_TOP
 
+# TPIDR_EL0 is where libc keeps its thread pointer, and the exclusive monitor
+# is the address a load-exclusive armed. Both are real architectural state:
+# musl installs its TLS block through TPIDR_EL0 and locks with LDAXR/STLXR.
+let TPIDR = 0
+let EXCL = -1
+
 fn maskw(w: int) -> int {
   if w >= 64 { return -1 }
   return (1 << w) - 1
@@ -131,6 +137,31 @@ fn wr64(addr: int, v: int) {
   if mem_ok(addr, 8) == 0 { mem_fail("store outside guest memory", addr) }
   wr32(addr, v & M32)
   wr32(addr + 4, (v >> 32) & M32)
+}
+
+# Size-indexed accessors: 0 byte, 1 half, 2 word, 3 double.
+fn ld_size(size: int, addr: int) -> int {
+  if size == 0 { return rd8(addr) }
+  if size == 1 { return rd16(addr) }
+  if size == 2 { return rd32(addr) }
+  return rd64(addr)
+}
+
+fn st_size(size: int, addr: int, v: int) {
+  if size == 0 { wr8(addr, v) }
+  else if size == 1 { wr16(addr, v) }
+  else if size == 2 { wr32(addr, v) }
+  else { wr64(addr, v) }
+}
+
+fn zero_mem(addr: int, n: int) {
+  if n <= 0 { return }
+  if mem_ok(addr, n) == 0 { mem_fail("zeroed range", addr) }
+  let i = 0
+  while i < n {
+    MEM[addr - BASE + i] = 0
+    i = i + 1
+  }
 }
 
 fn fetch32(addr: int) -> int {

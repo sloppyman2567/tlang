@@ -86,9 +86,12 @@ fn subf(a: int, b: int, cin: int, w: int) -> int {
   let bin = 1 - (cin & 1)
   let s = (x - y - bin) & m
   let sh = w - 1
-  let na = (~x) & m
-  let borrow = ((na & y) | ((na | y) & (0 - bin))) >> sh & 1
-  CF = 1 - borrow
+  # Carry-out of x - y - bin is the classic msb formula. Looking only at
+  # (~x & y) misses every borrow that is not decided in the top bit alone,
+  # which turns `cmp a, b` into the wrong answer whenever b > a.
+  let noty = (~y) & m
+  let nots = (~s) & m
+  CF = (((x & noty) | (x & nots) | (noty & nots)) >> sh) & 1
   VF = ((x ^ y) & (x ^ s)) >> sh & 1
   NF = (s >> sh) & 1
   ZF = s == 0
@@ -201,20 +204,147 @@ fn do_br(ins: int) {
 
 fn do_system(ins: int) {
   if (ins & 0xFFFFF09F) == 0xD503309F { return }   # DSB / DMB / ISB
-  if (ins & 0xFFFFF09F) == 0xD503201F { return }   # NOP, YIELD, WFE, WFI, SEV
+  if (ins & 0xFFFFF09F) == 0xD503201F { return }   # NOP, YIELD, WFE, WFI, SEV, BTI
+  # Pointer authentication needs a key this interpreter does not have. Nothing
+  # is ever signed, so authenticating is a no-op rather than a failure.
+  if (ins & 0xFFFFFF1F) == 0xD503231F { return }   # PACIASP / AUTIASP (and B forms)
   if (ins & 0xFFF00000) == 0xD5300000 {            # MRS
     let rt = bf(ins, 0, 5)
-    if (ins & 0xFFFFFFE0) == 0xD53BD040 { xset(rt, 0); return }        # TPIDR_EL0
-    if (ins & 0xFFFFFFE0) == 0xD53BE040 { xset(rt, TICKS); return }    # CNTVCT_EL0
+    if (ins & 0xFFFFFFE0) == 0xD53BD040 { xset(rt, TPIDR); return }     # TPIDR_EL0
+    if (ins & 0xFFFFFFE0) == 0xD53BE040 { xset(rt, TICKS); return }     # CNTVCT_EL0
     if (ins & 0xFFFFFFE0) == 0xD53BE000 { xset(rt, 1000000000); return } # CNTFRQ_EL0
+    # 64-byte cache blocks, and DC ZVA reported as prohibited, so libc's memset
+    # takes its ordinary store loop instead of issuing cache maintenance.
+    if (ins & 0xFFFFFFE0) == 0xD53B00E0 { xset(rt, 0x14); return }      # DCZID_EL0
     unsup("unsupported system register read", ins)
   }
   if (ins & 0xFFF00000) == 0xD5100000 {            # MSR
-    if (ins & 0xFFFFFFE0) == 0xD51BD040 { return }  # TPIDR_EL0: ignored
+    let rt = bf(ins, 0, 5)
+    if (ins & 0xFFFFFFE0) == 0xD51BD040 { TPIDR = xget(rt); return }    # TPIDR_EL0
     unsup("unsupported system register write", ins)
   }
   if (ins & 0xFFF00000) == 0xD5000000 { return }    # SYS / cache maintenance
   bad(ins)
+}
+
+# ---------------------------------------------------------------- SIMD moves
+
+# The only vector operations a static libc uses on this path move a scalar into
+# a vector register and back (memset's word-at-a-time loop). imm5 selects the
+# element size: its lowest set bit b means 1 << b bytes.
+fn simd_element(imm5: int) -> int {
+  let k = 0
+  while k < 5 {
+    if ((imm5 >> k) & 1) == 1 { return k }
+    k = k + 1
+  }
+  return -1
+}
+
+fn movi_byte(cmode: int, imm8: int, i: int) -> int {
+  if cmode == 14 { return imm8 }                       # 8-bit
+  if cmode == 8 || cmode == 10 {                       # 16-bit, LSL #0/#8
+    let v = imm8
+    if cmode == 10 { v = imm8 << 8 }
+    return (v >> (8 * (i % 2))) & 0xFF
+  }
+  # 0, 2, 4, 6: a 32-bit lane with the immediate shifted by 0, 8, 16 or 24.
+  let v = imm8 << ((cmode / 2) * 8)
+  return (v >> (8 * (i % 4))) & 0xFF
+}
+
+fn simd_dup(ins: int) {
+  let imm5 = bf(ins, 16, 5)
+  let k = simd_element(imm5)
+  if k < 0 { bad(ins) }
+  let bytes = 1 << k
+  let rt = bf(ins, 0, 5)
+  let v = xget(bf(ins, 5, 5)) & maskw(bytes * 8)
+  let total = 8
+  if bf(ins, 30, 1) == 1 { total = 16 }
+  let i = 0
+  while i < 16 {
+    if i < total {
+      Q[rt * 16 + i] = (v >> ((i % bytes) * 8)) & 0xFF
+    } else {
+      Q[rt * 16 + i] = 0
+    }
+    i = i + 1
+  }
+}
+
+# MOVI: the replicated modified-immediate forms compilers use to materialise
+# a constant into a vector register (gcc initialises small local arrays this
+# way, then stores the whole 128-bit register).
+fn simd_movi(ins: int) {
+  let cmode = bf(ins, 12, 4)
+  let imm8 = (bf(ins, 16, 3) << 5) | bf(ins, 5, 5)
+  # 12/13/15 are the MSL and 64-bit-lane forms, which compilers never emit for
+  # plain constants; refuse them rather than silently produce a wrong value.
+  if cmode == 12 || cmode == 13 || cmode == 15 { bad(ins) }
+  let rt = bf(ins, 0, 5)
+  let total = 8
+  if bf(ins, 30, 1) == 1 { total = 16 }
+  let i = 0
+  while i < 16 {
+    if i < total {
+      Q[rt * 16 + i] = movi_byte(cmode, imm8, i)
+    } else {
+      Q[rt * 16 + i] = 0
+    }
+    i = i + 1
+  }
+}
+
+fn simd_umov(ins: int) {
+  let imm5 = bf(ins, 16, 5)
+  let k = simd_element(imm5)
+  if k < 0 { bad(ins) }
+  let bytes = 1 << k
+  let lane = imm5 >> (k + 1)
+  let base = bf(ins, 5, 5) * 16 + lane * bytes
+  let v = 0
+  let i = 0
+  while i < bytes {
+    v = v | (Q[base + i] << (8 * i))
+    i = i + 1
+  }
+  xset(bf(ins, 0, 5), v)
+}
+
+# ---------------------------------------------------------------- atomics
+
+# Load/store exclusive and acquire/release. One guest thread runs at a time, so
+# the monitor is a single address and a store-exclusive succeeds whenever the
+# guest still owns the reservation it took: exactly what a lock expects.
+fn do_exclusive(ins: int) {
+  let size = bf(ins, 30, 2)
+  let o2 = bf(ins, 23, 1)
+  let load = bf(ins, 22, 1)
+  let o1 = bf(ins, 21, 1)
+  let o0 = bf(ins, 15, 1)
+  let rt = bf(ins, 0, 5)
+  let rn = bf(ins, 5, 5)
+  let rs = bf(ins, 16, 5)
+  # Pairs and compare-and-swap share this encoding group but not its semantics.
+  if o1 == 1 { unsup("exclusive pair or compare-and-swap", ins) }
+  let addr = xget(rn)
+  if load == 1 {
+    xset(rt, ld_size(size, addr))
+    if o2 == 0 { EXCL = addr }        # LDXR / LDAXR arm the monitor
+    return
+  }
+  if o2 == 1 {                        # STLR: no status register
+    st_size(size, addr, xget(rt))
+    return
+  }
+  if EXCL == addr {
+    st_size(size, addr, xget(rt))
+    xset(rs, 0)
+    EXCL = -1
+  } else {
+    xset(rs, 1)
+  }
 }
 
 # ---------------------------------------------------------------- immediates
@@ -358,10 +488,12 @@ fn do_extract(ins: int) {
   if is64 == 0 { w = 32 }
   let lsb = bf(ins, 10, 6)
   if w == 32 { lsb = lsb & 31 }
-  let a = xget(bf(ins, 5, 5))
-  let b = xget(bf(ins, 16, 5))
+  # The concatenation is Rn:Rm, so the low half comes from Rm and the bits
+  # shifted in at the top come from Rn.
+  let low = xget(bf(ins, 16, 5))
+  let high = xget(bf(ins, 5, 5))
   let r = 0
-  if lsb == 0 { r = a } else { r = lsr(a, lsb, w) | (b << (w - lsb)) }
+  if lsb == 0 { r = low } else { r = lsr(low, lsb, w) | (high << (w - lsb)) }
   xset(bf(ins, 0, 5), r & maskw(w))
 }
 
@@ -681,12 +813,18 @@ fn do_ldst_unscaled(ins: int) {
   let op2 = bf(ins, 10, 2)
   let rn = bf(ins, 5, 5)
   let rt = bf(ins, 0, 5)
-  if bf(ins, 26, 1) == 1 { unsup("SIMD/FP load or store", ins) }
   let base = sp_get(rn)
   let off = sx(bf(ins, 12, 9), 9)
   let addr = base + off
   if op2 == 1 { addr = base }          # post-index accesses at the old base
-  ldst(size, opc, rt, addr)
+  if bf(ins, 26, 1) == 1 {
+    # 128-bit vector forms: opc 10 stores, 11 loads (as in the scaled form).
+    if size == 0 && opc == 2 { q_store(rt, addr) }
+    else if size == 0 && opc == 3 { q_load(rt, addr) }
+    else { unsup("SIMD/FP load or store", ins) }
+  } else {
+    ldst(size, opc, rt, addr)
+  }
   if op2 == 1 || op2 == 3 { sp_set(rn, base + off) }
 }
 
@@ -695,10 +833,16 @@ fn do_ldst_reg(ins: int) {
   let opc = bf(ins, 22, 2)
   let rt = bf(ins, 0, 5)
   let vec = bf(ins, 26, 1)
-  if vec == 1 { unsup("SIMD/FP load or store", ins) }
   let off = ext_reg(xget(bf(ins, 16, 5)), bf(ins, 13, 3), 0)
   if bf(ins, 12, 1) == 1 { off = off << size }
-  ldst(size, opc, rt, sp_get(bf(ins, 5, 5)) + off)
+  let addr = sp_get(bf(ins, 5, 5)) + off
+  if vec == 1 {
+    if size == 0 && opc == 2 { q_store(rt, addr) }
+    else if size == 0 && opc == 3 { q_load(rt, addr) }
+    else { unsup("SIMD/FP load or store", ins) }
+    return
+  }
+  ldst(size, opc, rt, addr)
 }
 
 fn do_ldlit(ins: int) {
@@ -769,7 +913,11 @@ fn step(ins: int) {
   if (ins & 0x7E000000) == 0x36000000 { do_tbz(ins); return }    # TBZ / TBNZ
   if (ins & 0xFE000000) == 0xD6000000 { do_br(ins); return }     # BR / BLR / RET
   if (ins & 0xFF800000) == 0xD5000000 { do_system(ins); return } # hints, MRS/MSR
+  if (ins & 0xFFE0001F) == 0xD4200000 { die("guest breakpoint at pc 0x" + hex(AT)) }
 
+  if (ins & 0xBFE0FC00) == 0x0E000C00 { simd_dup(ins); return }  # DUP (general)
+  if (ins & 0xBFF80C00) == 0x0F000400 { simd_movi(ins); return } # MOVI (immediate)
+  if (ins & 0xBFE0FC00) == 0x0E003C00 { simd_umov(ins); return } # UMOV
   if (ins & 0x1F000000) == 0x10000000 { do_adr(ins); return }
   if (ins & 0x1F000000) == 0x11000000 { do_addsub_imm(ins); return }
   if (ins & 0x1F800000) == 0x12000000 { do_logical_imm(ins); return }
@@ -783,10 +931,13 @@ fn step(ins: int) {
   if (ins & 0x1FE00000) == 0x1A800000 { do_csel(ins); return }
   if (ins & 0x1FE00800) == 0x1A400800 { do_ccmp(ins, 1); return }
   if (ins & 0x1FE00800) == 0x1A400000 { do_ccmp(ins, 0); return }
-  if (ins & 0x1FE00000) == 0x1AC00000 { do_dp2(ins); return }
+  # DP2 and DP1 share bits 28:21 and differ in bit 30, so the mask must keep
+  # it: without that, 64-bit rbit/clz/rev are decoded as UDIV/SDIV operands.
+  if (ins & 0x5FE00000) == 0x1AC00000 { do_dp2(ins); return }
   if (ins & 0x5FE00000) == 0x5AC00000 { do_dp1(ins); return }
   if (ins & 0x1F000000) == 0x1B000000 { do_dp3(ins); return }
 
+  if (ins & 0x3F000000) == 0x08000000 { do_exclusive(ins); return } # LDXR/STXR/LDAR/STLR
   if (ins & 0x3B000000) == 0x18000000 { do_ldlit(ins); return }
   if (ins & 0x3A000000) == 0x28000000 { do_ldstp(ins); return }
   if (ins & 0x3B000000) == 0x39000000 { do_ldst_uimm(ins); return }

@@ -8,6 +8,10 @@
 # a much larger syscall surface.
 
 let IMG_END = 0
+# Program headers have to be addressable by the guest: libc walks them from
+# AT_PHDR to find PT_TLS. They live inside whichever PT_LOAD covers them.
+let IMG_PHDR = 0
+let IMG_PHNUM = 0
 
 fn le16(f: str, o: int) -> int {
   return f[o] | (f[o + 1] << 8)
@@ -49,6 +53,7 @@ fn elf_load(path: str) -> int {
   let phentsize = le16(f, 54)
   let phnum = le16(f, 56)
   if phnum == 0 { die("ELF file has no program headers") }
+  IMG_PHNUM = phnum
   if phentsize < 56 { die("unexpected program header size " + phentsize) }
   if phoff + phnum * phentsize > n { die("program headers outside the file") }
 
@@ -66,6 +71,9 @@ fn elf_load(path: str) -> int {
       let memsz = le64(f, p + 40)
       if filesz > memsz { die("PT_LOAD has p_filesz > p_memsz") }
       if off + filesz > n { die("PT_LOAD data outside the file") }
+      if (phoff >= off) && (phoff < off + filesz) {
+        IMG_PHDR = vaddr + (phoff - off)
+      }
       if mem_ok(vaddr, memsz) == 0 {
         die("PT_LOAD segment at 0x" + hex(vaddr) + " does not fit in guest memory")
       }
@@ -85,6 +93,7 @@ fn elf_load(path: str) -> int {
   }
 
   if IMG_END == 0 { die("ELF file has no loadable segments") }
+  if IMG_PHDR == 0 { die("program headers are not inside a loadable segment") }
   if entry < BASE || entry >= MEM_TOP {
     die("entry point 0x" + hex(entry) + " is outside guest memory")
   }
