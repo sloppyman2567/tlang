@@ -42,7 +42,7 @@ Measured on x86-64 Linux with binutils 2.47:
 | **tbox** (four tools: `wc`, `head`, `tail`, `grep`) | **7,106 B** | — |
 | **tjson** (JSON validate, format, query) | 13,510 B | — |
 | **tbf** (Brainfuck interpreter) | 4,605 B | — |
-| tcomp, the whole compiler | 158,970 B | — |
+| tcomp, the whole compiler | 166,257 B | — |
 | *for comparison:* hello world in C, `gcc -Os -s` | 14,472 B | — |
 | *for comparison:* `grep` + `wc` + `head` + `tail` from coreutils | 437 KB | — |
 
@@ -93,12 +93,12 @@ Tools/selfhost.sh --verify     # builds Build/tcomp and proves the fixed point
 
 ```
 stage 1: tcomp.tl -> Build/tcomp0 (via stage 0)
-  Build/tcomp0: 173665 bytes
+  Build/tcomp0: 178514 bytes
 stage 2: tcomp.tl -> Build/tcomp (via stage 1)
-  Build/tcomp: 158970 bytes
+  Build/tcomp: 166257 bytes
 stage 3: tcomp.tl -> Build/tcomp2 (via stage 2)
 stage 4: tcomp.tl -> Build/tcomp3 (via stage 3)
-fixed point: stage 2 and stage 3 are identical (158970 bytes)
+fixed point: stage 2 and stage 3 are identical (166257 bytes)
 ```
 
 `Build/tcomp` emits assembly on stdout:
@@ -487,6 +487,12 @@ in the module headers.
 | `append_file(path, data)` | append text to a file; `1` on success |
 | `file_exists(path)` | `1` if the path can be accessed |
 | `file_size(path)` | real file length in bytes, even when the data contains NUL |
+| `now()` | nanoseconds since the Unix epoch |
+| `sleep_ns(n)` | sleep for at least `n` nanoseconds; `0` on success |
+| `random_int()` | 64 random bits from `getrandom` |
+| `getpid()` | the process id |
+| `mkdir(path, mode)`, `unlink(path)`, `rename(old, new)` | directory and file operations; `0` on success |
+| `getcwd()` | current directory as a string, or `""` on failure |
 | `sock(path)` | connect a Unix socket; used by the X11 client and the Wayland module |
 | `fd_read(fd, buf, n)`, `fd_write(fd, buf, n)` | binary read/write of `n` bytes, retrying short transfers |
 | `fd_poll(fd, ms)` | wait up to `ms` for socket readability |
@@ -1098,6 +1104,7 @@ python3 Tests/runtime_test.py   # runtime dependency closure and assembly
 python3 Tests/freestanding_test.py     # kernel image: no syscalls, links, refuses misuse
 python3 Tests/machine_builtins_test.py # machine builtins and the kernel runtime stubs
 python3 Tests/env_test.py       # environment lookup in both compilers
+python3 Tests/portability_test.py # common Linux builtins in both compilers
 python3 Tests/kernel_test.py   # boots the desktop, clicks and types at it
 python3 Tests/errors_test.py    # same rejections and messages in both compilers
 python3 Tests/compare_test.py   # stage 0 and self-hosted compiler must agree
@@ -1178,6 +1185,7 @@ Tests/runtime_test.py runtime dependency closure and assembly
 Tests/freestanding_test.py freestanding build mode and kernel linker script
 Tests/machine_builtins_test.py machine builtins and kernel runtime stubs
 Tests/env_test.py     environment variable lookup in both compilers
+Tests/portability_test.py  time, entropy and directory builtins in both compilers
 Tests/kernel_test.py  boots the desktop, clicks and types at it, checks the log
 Tests/errors_test.py  identical rejections and diagnostics in both compilers
 Tests/compare_test.py stage 0 vs self-hosted differential test

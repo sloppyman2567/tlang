@@ -95,6 +95,14 @@ BUILTIN_IDS = {
     'console_dirty': 69,
     'fb_clip': 70,
     'fb_indexed': 71,
+    'now': 95,
+    'sleep_ns': 96,
+    'random_int': 97,
+    'getpid': 98,
+    'mkdir': 99,
+    'unlink': 100,
+    'rename': 101,
+    'getcwd': 102,
 }
 
 BUILTIN_NAMES = {
@@ -192,6 +200,14 @@ BUILTIN_NAMES = {
     69: 'console_dirty',
     70: 'fb_clip',
     71: 'fb_indexed',
+    95: 'now',
+    96: 'sleep_ns',
+    97: 'random_int',
+    98: 'getpid',
+    99: 'mkdir',
+    100: 'unlink',
+    101: 'rename',
+    102: 'getcwd',
 }
 
 BUILTIN_ARGS = {
@@ -285,6 +301,14 @@ BUILTIN_ARGS = {
     'console_dirty': (),
     'fb_clip': (('int',),('int',),('int',),('int',),),
     'fb_indexed': (('int',),('int',),('int',),('int',),('int',),('int',),),
+    'now': (),
+    'sleep_ns': (('int',),),
+    'random_int': (),
+    'getpid': (),
+    'mkdir': (('str',),('int',),),
+    'unlink': (('str',),),
+    'rename': (('str',),('str',),),
+    'getcwd': (),
 }
 
 BUILTINS = {
@@ -381,6 +405,14 @@ BUILTINS = {
     'console_dirty': (0, 'int', '__k_console_dirty'),
     'fb_clip': (4, 'int', '__k_fb_clip'),
     'fb_indexed': (6, 'int', '__k_fb_indexed'),
+    'now': (0, 'int', '__t_now'),
+    'sleep_ns': (1, 'int', '__t_sleep_ns'),
+    'random_int': (0, 'int', '__t_random_int'),
+    'getpid': (0, 'int', '__t_getpid'),
+    'mkdir': (2, 'int', '__t_mkdir'),
+    'unlink': (1, 'int', '__t_unlink'),
+    'rename': (2, 'int', '__t_rename'),
+    'getcwd': (0, 'str', '__t_getcwd'),
 }
 
 BUILTIN_MODES = {
@@ -437,4 +469,12 @@ BUILTIN_MODES = {
     'console_dirty': 'kernel',
     'fb_clip': 'kernel',
     'fb_indexed': 'kernel',
+    'now': 'hosted',
+    'sleep_ns': 'hosted',
+    'random_int': 'hosted',
+    'getpid': 'hosted',
+    'mkdir': 'hosted',
+    'unlink': 'hosted',
+    'rename': 'hosted',
+    'getcwd': 'hosted',
 }

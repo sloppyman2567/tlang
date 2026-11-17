@@ -180,6 +180,14 @@ let U_SOCK = 0
 let U_FDREAD = 0
 let U_FDWRITE = 0
 let U_FDPOLL = 0
+let U_NOW = 0
+let U_SLEEPNS = 0
+let U_RANDOM = 0
+let U_GETPID = 0
+let U_MKDIR = 0
+let U_UNLINK = 0
+let U_RENAME = 0
+let U_GETCWD = 0
 let U_FLOAT = 0
 let U_PRINTFLOAT = 0
 
@@ -3741,6 +3749,98 @@ fn parse_builtin(name: str, kind: int) {
     GTYPE = "float"
     return
   }
+  if kind == 95 {
+    adv()
+    expect(TK_RPAREN)
+    el("  call __t_now")
+    U_NOW = 1
+    GTYPE = "int"
+    return
+  }
+  if kind == 96 {
+    one_arg(name)
+    if GTYPE != "" && GTYPE != "int" {
+      err(arg_msg("sleep_ns", 1, "int"))
+    }
+    el("  mov rdi, rax")
+    el("  call __t_sleep_ns")
+    U_SLEEPNS = 1
+    GTYPE = "int"
+    return
+  }
+  if kind == 97 {
+    adv()
+    expect(TK_RPAREN)
+    el("  call __t_random_int")
+    U_RANDOM = 1
+    GTYPE = "int"
+    return
+  }
+  if kind == 98 {
+    adv()
+    expect(TK_RPAREN)
+    el("  call __t_getpid")
+    U_GETPID = 1
+    GTYPE = "int"
+    return
+  }
+  if kind == 99 {
+    adv()
+    let m0 = tmp()
+    expr()
+    if GTYPE != "" && GTYPE != "str" { err(arg_msg("mkdir", 1, "str")) }
+    st(m0)
+    expect(TK_COMMA)
+    let m1 = tmp()
+    expr()
+    if GTYPE != "" && GTYPE != "int" { err(arg_msg("mkdir", 2, "int")) }
+    st(m1)
+    expect(TK_RPAREN)
+    el("  mov rdi, " + loc(m0))
+    el("  mov rsi, " + loc(m1))
+    el("  call __t_mkdir")
+    U_MKDIR = 1
+    GTYPE = "int"
+    return
+  }
+  if kind == 100 {
+    one_arg(name)
+    if GTYPE != "" && GTYPE != "str" { err(arg_msg("unlink", 1, "str")) }
+    el("  mov rdi, rax")
+    el("  call __t_unlink")
+    U_UNLINK = 1
+    GTYPE = "int"
+    return
+  }
+  if kind == 101 {
+    adv()
+    let r0 = tmp()
+    expr()
+    if GTYPE != "" && GTYPE != "str" { err(arg_msg("rename", 1, "str")) }
+    st(r0)
+    expect(TK_COMMA)
+    let r1 = tmp()
+    expr()
+    if GTYPE != "" && GTYPE != "str" { err(arg_msg("rename", 2, "str")) }
+    st(r1)
+    expect(TK_RPAREN)
+    el("  mov rdi, " + loc(r0))
+    el("  mov rsi, " + loc(r1))
+    el("  call __t_rename")
+    U_RENAME = 1
+    GTYPE = "int"
+    return
+  }
+  if kind == 102 {
+    adv()
+    expect(TK_RPAREN)
+    el("  call __t_getcwd")
+    U_GETCWD = 1
+    U_NEWBUF = 1
+    U_ALLOC = 1
+    GTYPE = "str"
+    return
+  }
   one_arg(name)
   if GTYPE != "" && GTYPE != "int" {
     err(arg_msg("exit", 1, "int"))
@@ -5086,8 +5186,10 @@ fn scan_needs_args() {
       if str_eq(TV[i], "argc") == 1 {
         U_ARGC = 1
       }
+      # argv() bounds-checks against argc, so it needs the count too.
       if str_eq(TV[i], "argv") == 1 {
         U_ARGV = 1
+        U_ARGC = 1
       }
       # env() reads the argc/argv strings from the same startup capture.
       if str_eq(TV[i], "env") == 1 {
@@ -5349,6 +5451,14 @@ fn emit_runtime() {
   if U_FDPOLL == 1 {
     rt_emit_fd_poll()
   }
+  if U_NOW == 1 { rt_emit_now() }
+  if U_SLEEPNS == 1 { rt_emit_sleep_ns() }
+  if U_RANDOM == 1 { rt_emit_random_int() }
+  if U_GETPID == 1 { rt_emit_getpid() }
+  if U_MKDIR == 1 { rt_emit_mkdir() }
+  if U_UNLINK == 1 { rt_emit_unlink() }
+  if U_RENAME == 1 { rt_emit_rename() }
+  if U_GETCWD == 1 { rt_emit_getcwd() }
   if U_NEWBUF == 1 {
     rt_emit_newbuf()
   }

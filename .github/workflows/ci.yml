@@ -35,6 +35,7 @@ jobs:
           python3 Tests/diff_test.py
           python3 Tests/compare_test.py
           python3 Tests/env_test.py
+          python3 Tests/portability_test.py
           python3 Tests/floats_test.py
           python3 Tests/modules_test.py
       - name: Programs and C translator

@@ -1681,6 +1681,103 @@ RUNTIME = {
   ret""",
         ["ftoa", "print", "print_int", "print_char"],
     ),
+    # Common Linux features. These are hosted-only: a freestanding image has
+    # no kernel to provide clocks, entropy, files or processes. Syscall numbers
+    # are x86-64; a future architecture port would select them per target.
+    "now": (
+        """__t_now:
+  sub rsp, 16
+  xor edi, edi
+  mov rsi, rsp
+  mov eax, 228
+  syscall
+  mov rax, [rsp]
+  imul rax, 1000000000
+  add rax, [rsp + 8]
+  add rsp, 16
+  ret""",
+        [],
+    ),
+    "sleep_ns": (
+        """__t_sleep_ns:
+  test rdi, rdi
+  js .Lt_sl_einval
+  sub rsp, 16
+  mov rax, rdi
+  xor rdx, rdx
+  mov rcx, 1000000000
+  div rcx
+  mov [rsp], rax
+  mov [rsp + 8], rdx
+  mov rdi, rsp
+  xor esi, esi
+  mov eax, 35
+  syscall
+  add rsp, 16
+  ret
+.Lt_sl_einval:
+  mov eax, -22
+  ret""",
+        [],
+    ),
+    "random_int": (
+        """__t_random_int:
+  sub rsp, 8
+  mov rdi, rsp
+  mov esi, 8
+  xor edx, edx
+  mov eax, 318
+  syscall
+  mov rax, [rsp]
+  add rsp, 8
+  ret""",
+        [],
+    ),
+    "getpid": (
+        """__t_getpid:
+  mov eax, 39
+  syscall
+  ret""",
+        [],
+    ),
+    "mkdir": (
+        """__t_mkdir:
+  mov eax, 83
+  syscall
+  ret""",
+        [],
+    ),
+    "unlink": (
+        """__t_unlink:
+  mov eax, 87
+  syscall
+  ret""",
+        [],
+    ),
+    "rename": (
+        """__t_rename:
+  mov eax, 82
+  syscall
+  ret""",
+        [],
+    ),
+    "getcwd": (
+        """__t_getcwd:
+  mov edi, 4096
+  call __t_newbuf
+  mov rdi, rax
+  mov esi, 4096
+  mov eax, 79
+  syscall
+  test rax, rax
+  js .Lt_gcwd_fail
+  mov rax, rdi
+  ret
+.Lt_gcwd_fail:
+  lea rax, [rip + __t_empty]
+  ret""",
+        ["newbuf"],
+    ),
 }
 
 # Canonical table keyed by the real assembly symbol.

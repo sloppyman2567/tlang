@@ -114,7 +114,8 @@ def fold_bin(kind, a, b):
     if kind == "mul":
         return _wrap64(a * b)
     if kind in ("div", "mod"):
-        if b == 0:
+        # x86 idiv traps on both of these, so they must stay runtime ops.
+        if b == 0 or (a == -(1 << 63) and b == -1):
             return None
         return _trunc_div(a, b) if kind == "div" else _trunc_mod(a, b)
     if kind == "shl":

@@ -1621,3 +1621,97 @@ fn rt_emit_print_float() {
   el("  pop rbx")
   el("  ret")
 }
+
+fn rt_emit_now() {
+  el("__t_now:")
+  el("  sub rsp, 16")
+  el("  xor edi, edi")
+  el("  mov rsi, rsp")
+  el("  mov eax, 228")
+  el("  syscall")
+  el("  mov rax, [rsp]")
+  el("  imul rax, 1000000000")
+  el("  add rax, [rsp + 8]")
+  el("  add rsp, 16")
+  el("  ret")
+}
+
+fn rt_emit_sleep_ns() {
+  el("__t_sleep_ns:")
+  el("  test rdi, rdi")
+  el("  js .Lt_sl_einval")
+  el("  sub rsp, 16")
+  el("  mov rax, rdi")
+  el("  xor rdx, rdx")
+  el("  mov rcx, 1000000000")
+  el("  div rcx")
+  el("  mov [rsp], rax")
+  el("  mov [rsp + 8], rdx")
+  el("  mov rdi, rsp")
+  el("  xor esi, esi")
+  el("  mov eax, 35")
+  el("  syscall")
+  el("  add rsp, 16")
+  el("  ret")
+  el(".Lt_sl_einval:")
+  el("  mov eax, -22")
+  el("  ret")
+}
+
+fn rt_emit_random_int() {
+  el("__t_random_int:")
+  el("  sub rsp, 8")
+  el("  mov rdi, rsp")
+  el("  mov esi, 8")
+  el("  xor edx, edx")
+  el("  mov eax, 318")
+  el("  syscall")
+  el("  mov rax, [rsp]")
+  el("  add rsp, 8")
+  el("  ret")
+}
+
+fn rt_emit_getpid() {
+  el("__t_getpid:")
+  el("  mov eax, 39")
+  el("  syscall")
+  el("  ret")
+}
+
+fn rt_emit_mkdir() {
+  el("__t_mkdir:")
+  el("  mov eax, 83")
+  el("  syscall")
+  el("  ret")
+}
+
+fn rt_emit_unlink() {
+  el("__t_unlink:")
+  el("  mov eax, 87")
+  el("  syscall")
+  el("  ret")
+}
+
+fn rt_emit_rename() {
+  el("__t_rename:")
+  el("  mov eax, 82")
+  el("  syscall")
+  el("  ret")
+}
+
+fn rt_emit_getcwd() {
+  el("__t_getcwd:")
+  el("  mov edi, 4096")
+  el("  call __t_newbuf")
+  el("  mov rdi, rax")
+  el("  mov esi, 4096")
+  el("  mov eax, 79")
+  el("  syscall")
+  el("  test rax, rax")
+  el("  js .Lt_gcwd_fail")
+  el("  mov rax, rdi")
+  el("  ret")
+  el(".Lt_gcwd_fail:")
+  el("  lea rax, [rip + __t_empty]")
+  el("  ret")
+}

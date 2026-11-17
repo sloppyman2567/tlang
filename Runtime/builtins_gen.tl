@@ -283,6 +283,30 @@ fn builtin_kind(n: str) -> int {
   if str_eq(n, "fb_indexed") == 1 {
     return 71
   }
+  if str_eq(n, "now") == 1 {
+    return 95
+  }
+  if str_eq(n, "sleep_ns") == 1 {
+    return 96
+  }
+  if str_eq(n, "random_int") == 1 {
+    return 97
+  }
+  if str_eq(n, "getpid") == 1 {
+    return 98
+  }
+  if str_eq(n, "mkdir") == 1 {
+    return 99
+  }
+  if str_eq(n, "unlink") == 1 {
+    return 100
+  }
+  if str_eq(n, "rename") == 1 {
+    return 101
+  }
+  if str_eq(n, "getcwd") == 1 {
+    return 102
+  }
   return 0
 }
 
@@ -339,6 +363,30 @@ fn builtin_hosted(n: str) -> int {
     return 1
   }
   if str_eq(n, "env") == 1 {
+    return 1
+  }
+  if str_eq(n, "now") == 1 {
+    return 1
+  }
+  if str_eq(n, "sleep_ns") == 1 {
+    return 1
+  }
+  if str_eq(n, "random_int") == 1 {
+    return 1
+  }
+  if str_eq(n, "getpid") == 1 {
+    return 1
+  }
+  if str_eq(n, "mkdir") == 1 {
+    return 1
+  }
+  if str_eq(n, "unlink") == 1 {
+    return 1
+  }
+  if str_eq(n, "rename") == 1 {
+    return 1
+  }
+  if str_eq(n, "getcwd") == 1 {
     return 1
   }
   return 0

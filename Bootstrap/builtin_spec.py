@@ -154,6 +154,15 @@ BUILTIN_SPECS = (
     # of the kernel's image support; there is no decoder.
     ("fb_indexed", 71, 6, "int", "__k_fb_indexed",
      (("int",), ("int",), ("int",), ("int",), ("int",), ("int",)), True),
+    # Common Linux features, for source portability of real programs.
+    ("now", 95, 0, "int", "__t_now", (), True),
+    ("sleep_ns", 96, 1, "int", "__t_sleep_ns", (("int",),), True),
+    ("random_int", 97, 0, "int", "__t_random_int", (), True),
+    ("getpid", 98, 0, "int", "__t_getpid", (), True),
+    ("mkdir", 99, 2, "int", "__t_mkdir", (("str",), ("int",)), True),
+    ("unlink", 100, 1, "int", "__t_unlink", (("str",),), True),
+    ("rename", 101, 2, "int", "__t_rename", (("str",), ("str",)), True),
+    ("getcwd", 102, 0, "str", "__t_getcwd", (), True),
 )
 
 # Builtins that only make sense in one of the two build modes.  Everything
@@ -163,6 +172,8 @@ HOSTED_ONLY = frozenset({
     "input", "argv", "argc", "read_file", "file_size", "write_file",
     "append_file", "file_exists", "env", "sock", "fd_read", "fd_write", "fd_poll",
     "fd_pwrite", "fd_send", "shm", "arena_mark", "arena_release",
+    "now", "sleep_ns", "random_int", "getpid", "mkdir", "unlink", "rename",
+    "getcwd",
 })
 KERNEL_ONLY = frozenset({
     "peek8", "peek16", "peek32", "peek64",
