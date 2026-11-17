@@ -71,6 +71,26 @@ def main():
             },
             "main.tl", "b.tl:2:",
         )
+
+        # With a relative entry path, both compilers must print the relative
+        # imported path, not the absolute one the expander used to open it.
+        case = os.path.join(work, "relative")
+        os.makedirs(case, exist_ok=True)
+        with open(os.path.join(case, "main.tl"), "w") as fh:
+            fh.write('import "sub/lib.tl"\nfn main() { print_int(helper()) }\n')
+        os.makedirs(os.path.join(case, "sub"), exist_ok=True)
+        with open(os.path.join(case, "sub", "lib.tl"), "w") as fh:
+            fh.write('fn helper() -> int {\n  return "not an int"\n}\n')
+        for label, argv in (
+            ("stage0", [sys.executable, TCOMP, "build", "main.tl", "-o", "out"]),
+            ("stage1", [stage1, "main.tl"]),
+        ):
+            proc = subprocess.run(argv, cwd=case, capture_output=True,
+                                  text=True)
+            if not proc.stderr.startswith("sub/lib.tl:2:"):
+                failures.append(
+                    f"relative [{label}]: expected a leading sub/lib.tl:2:, "
+                    f"got:\n{proc.stderr.strip()}")
     except RuntimeError as exc:
         print(f"could not build the self-hosted compiler:\n{exc}")
         return 1

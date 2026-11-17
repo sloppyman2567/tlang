@@ -373,36 +373,11 @@ fn tw_dispatch(obj: int, op: int, n: int) -> int {
 
 # ------------------------------------------------------------------- socket
 
-# /proc/self/environ reports a real size of 0, so it cannot be bounded by
-# file_size(); the scan uses a fixed window and NUL-separated entries, the same
-# way the X client reads its cookie path.
+# The env() builtin reads the process environment directly. Scanning
+# /proc/self/environ by hand no longer works: its entries are NUL-separated,
+# so strlen() stops at the first one and slice() rejects any later entry.
 fn tw_env(key: str) -> str {
-  let e = read_file("/proc/self/environ")
-  let kl = tw_slen(key)
-  let i = 0
-  while i < 8192 {
-    let j = 0
-    let ok = 1
-    while j < kl {
-      if e[i + j] != key[j] {
-        ok = 0
-      }
-      j = j + 1
-    }
-    if ok == 1 && e[i + kl] == 61 {
-      let s = i + kl + 1
-      let end = s
-      while end < 8192 && e[end] != 0 {
-        end = end + 1
-      }
-      return slice(e, s, end - s)
-    }
-    while i < 8192 && e[i] != 0 {
-      i = i + 1
-    }
-    i = i + 1
-  }
-  return ""
+  return env(key)
 }
 
 fn tw_sock_path() -> str {

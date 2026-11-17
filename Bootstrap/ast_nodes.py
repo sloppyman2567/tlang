@@ -14,10 +14,18 @@ class Program(Node):
     structs: list = field(default_factory=list)
     funcs: list = field(default_factory=list)
     globals: list = field(default_factory=list)
+    consts: list = field(default_factory=list)
 
 
 @dataclass
 class Global(Node):
+    name: str = ""
+    expr: Node = None
+
+
+@dataclass
+class Const(Node):
+    """A compile-time name for an int or string literal; it has no storage."""
     name: str = ""
     expr: Node = None
 

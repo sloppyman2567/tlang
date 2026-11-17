@@ -600,7 +600,7 @@ fn do_ccmp(ins: int, immediate: int) {
 
 # ---------------------------------------------------------------- arithmetic
 
-fn udiv(a: int, b: int, w: int) -> int {
+fn soft_udiv(a: int, b: int, w: int) -> int {
   let m = maskw(w)
   let x = a & m
   let y = b & m
@@ -630,7 +630,7 @@ fn sdiv(a: int, b: int, w: int) -> int {
   let neg = 0
   if a < 0 { a = 0 - a; neg = neg ^ 1 }
   if b < 0 { b = 0 - b; neg = neg ^ 1 }
-  let q = udiv(a, b, w)
+  let q = soft_udiv(a, b, w)
   if neg == 1 { q = (0 - q) & maskw(w) }
   return q
 }
@@ -643,7 +643,7 @@ fn do_dp2(ins: int) {
   let a = xget(bf(ins, 5, 5))
   let b = xget(bf(ins, 16, 5))
   let r = 0
-  if op == 2 { r = udiv(a, b, w) }
+  if op == 2 { r = soft_udiv(a, b, w) }
   else if op == 3 { r = sdiv(a, b, w) }
   else if op == 8 { r = lsl(a, b, w) }
   else if op == 9 { r = lsr(a, b, w) }
@@ -653,7 +653,7 @@ fn do_dp2(ins: int) {
   xset(bf(ins, 0, 5), r & maskw(w))
 }
 
-fn rbit(v: int, w: int) -> int {
+fn soft_rbit(v: int, w: int) -> int {
   let r = 0
   let i = 0
   while i < w {
@@ -695,7 +695,7 @@ fn rev32(v: int) -> int {
   return r
 }
 
-fn clz(v: int, w: int) -> int {
+fn soft_clz(v: int, w: int) -> int {
   let i = w - 1
   let c = 0
   while i >= 0 {
@@ -725,11 +725,11 @@ fn do_dp1(ins: int) {
   let op = bf(ins, 10, 6)
   let v = xget(bf(ins, 5, 5)) & maskw(w)
   let r = 0
-  if op == 0 { r = rbit(v, w) }
+  if op == 0 { r = soft_rbit(v, w) }
   else if op == 1 { r = rev16(v, w) }
   else if op == 2 { r = rev32(v) }
   else if op == 3 { r = rev_bytes(v, w / 8) }
-  else if op == 4 { r = clz(v, w) }
+  else if op == 4 { r = soft_clz(v, w) }
   else if op == 5 { r = cls(v, w) }
   else { bad(ins) }
   xset(bf(ins, 0, 5), r & maskw(w))
@@ -906,44 +906,76 @@ fn do_ldstp(ins: int) {
 # ---------------------------------------------------------------- dispatch
 
 fn step(ins: int) {
-  if (ins & 0xFFE0001F) == 0xD4000001 { do_syscall(); return }   # SVC
-  if (ins & 0x7C000000) == 0x14000000 { do_b(ins); return }      # B / BL
-  if (ins & 0xFF000010) == 0x54000000 { do_bcond(ins); return }  # B.cond
-  if (ins & 0x7E000000) == 0x34000000 { do_cbz(ins); return }    # CBZ / CBNZ
-  if (ins & 0x7E000000) == 0x36000000 { do_tbz(ins); return }    # TBZ / TBNZ
-  if (ins & 0xFE000000) == 0xD6000000 { do_br(ins); return }     # BR / BLR / RET
-  if (ins & 0xFF800000) == 0xD5000000 { do_system(ins); return } # hints, MRS/MSR
-  if (ins & 0xFFE0001F) == 0xD4200000 { die("guest breakpoint at pc 0x" + hex(AT)) }
-
-  if (ins & 0xBFE0FC00) == 0x0E000C00 { simd_dup(ins); return }  # DUP (general)
-  if (ins & 0xBFF80C00) == 0x0F000400 { simd_movi(ins); return } # MOVI (immediate)
-  if (ins & 0xBFE0FC00) == 0x0E003C00 { simd_umov(ins); return } # UMOV
-  if (ins & 0x1F000000) == 0x10000000 { do_adr(ins); return }
-  if (ins & 0x1F000000) == 0x11000000 { do_addsub_imm(ins); return }
-  if (ins & 0x1F800000) == 0x12000000 { do_logical_imm(ins); return }
-  if (ins & 0x1F800000) == 0x12800000 { do_movewide(ins); return }
-  if (ins & 0x1F800000) == 0x13000000 { do_bitfield(ins); return }
-  if (ins & 0x1F800000) == 0x13800000 { do_extract(ins); return }
-
-  if (ins & 0x1F000000) == 0x0A000000 { do_logical_reg(ins); return }
-  if (ins & 0x1F200000) == 0x0B000000 { do_addsub_shift(ins); return }
-  if (ins & 0x1F200000) == 0x0B200000 { do_addsub_ext(ins); return }
-  if (ins & 0x1FE00000) == 0x1A800000 { do_csel(ins); return }
-  if (ins & 0x1FE00800) == 0x1A400800 { do_ccmp(ins, 1); return }
-  if (ins & 0x1FE00800) == 0x1A400000 { do_ccmp(ins, 0); return }
-  # DP2 and DP1 share bits 28:21 and differ in bit 30, so the mask must keep
-  # it: without that, 64-bit rbit/clz/rev are decoded as UDIV/SDIV operands.
-  if (ins & 0x5FE00000) == 0x1AC00000 { do_dp2(ins); return }
-  if (ins & 0x5FE00000) == 0x5AC00000 { do_dp1(ins); return }
-  if (ins & 0x1F000000) == 0x1B000000 { do_dp3(ins); return }
-
-  if (ins & 0x3F000000) == 0x08000000 { do_exclusive(ins); return } # LDXR/STXR/LDAR/STLR
-  if (ins & 0x3B000000) == 0x18000000 { do_ldlit(ins); return }
-  if (ins & 0x3A000000) == 0x28000000 { do_ldstp(ins); return }
-  if (ins & 0x3B000000) == 0x39000000 { do_ldst_uimm(ins); return }
-  if (ins & 0x3B200C00) == 0x38200800 { do_ldst_reg(ins); return }
-  if (ins & 0x3B200000) == 0x38000000 { do_ldst_unscaled(ins); return }
-
+  # Bits 28:25 give a dense 11-entry jump table.  Some decode masks
+  # deliberately ignore the opc bits, so a check can match two keys; those
+  # checks are repeated in both arms, in the original precedence order.
+  switch (ins >> 25) & 15 {
+    case 4 {                             # exclusive, load/store pair
+      if (ins & 0x3F000000) == 0x08000000 { do_exclusive(ins); return }
+      if (ins & 0x3A000000) == 0x28000000 { do_ldstp(ins); return }
+    }
+    case 5 {                             # logical and add/sub, register
+      if (ins & 0x1F000000) == 0x0A000000 { do_logical_reg(ins); return }
+      if (ins & 0x1F200000) == 0x0B000000 { do_addsub_shift(ins); return }
+      if (ins & 0x1F200000) == 0x0B200000 { do_addsub_ext(ins); return }
+    }
+    case 6 {
+      if (ins & 0x3A000000) == 0x28000000 { do_ldstp(ins); return }
+    }
+    case 7 {                             # SIMD DUP / MOVI / UMOV
+      if (ins & 0xBFE0FC00) == 0x0E000C00 { simd_dup(ins); return }
+      if (ins & 0xBFF80C00) == 0x0F000400 { simd_movi(ins); return }
+      if (ins & 0xBFE0FC00) == 0x0E003C00 { simd_umov(ins); return }
+    }
+    case 8 {
+      if (ins & 0x1F000000) == 0x10000000 { do_adr(ins); return }
+      if (ins & 0x1F000000) == 0x11000000 { do_addsub_imm(ins); return }
+    }
+    case 9 {
+      if (ins & 0x1F800000) == 0x12000000 { do_logical_imm(ins); return }
+      if (ins & 0x1F800000) == 0x12800000 { do_movewide(ins); return }
+      if (ins & 0x1F800000) == 0x13000000 { do_bitfield(ins); return }
+      if (ins & 0x1F800000) == 0x13800000 { do_extract(ins); return }
+    }
+    case 10 {                            # SVC, B, B.cond, CBZ, system, brk
+      if (ins & 0xFFE0001F) == 0xD4000001 { do_syscall(); return }
+      if (ins & 0x7C000000) == 0x14000000 { do_b(ins); return }
+      if (ins & 0xFF000010) == 0x54000000 { do_bcond(ins); return }
+      if (ins & 0x7E000000) == 0x34000000 { do_cbz(ins); return }
+      if (ins & 0xFF800000) == 0xD5000000 { do_system(ins); return }
+      if (ins & 0xFFE0001F) == 0xD4200000 {
+        die("guest breakpoint at pc 0x" + hex(AT))
+      }
+    }
+    case 11 {                            # B/BL, TBZ, BR/BLR/RET
+      if (ins & 0x7C000000) == 0x14000000 { do_b(ins); return }
+      if (ins & 0x7E000000) == 0x36000000 { do_tbz(ins); return }
+      if (ins & 0xFE000000) == 0xD6000000 { do_br(ins); return }
+    }
+    case 12 {                            # literal and unsigned-offset loads
+      if (ins & 0x3B000000) == 0x18000000 { do_ldlit(ins); return }
+      if (ins & 0x3B000000) == 0x39000000 { do_ldst_uimm(ins); return }
+      if (ins & 0x3B200C00) == 0x38200800 { do_ldst_reg(ins); return }
+      if (ins & 0x3B200000) == 0x38000000 { do_ldst_unscaled(ins); return }
+    }
+    case 13 {                            # CSEL, CCMP, DP1/DP2/DP3
+      if (ins & 0x1FE00000) == 0x1A800000 { do_csel(ins); return }
+      if (ins & 0x1FE00800) == 0x1A400800 { do_ccmp(ins, 1); return }
+      if (ins & 0x1FE00800) == 0x1A400000 { do_ccmp(ins, 0); return }
+      # DP2 and DP1 share bits 28:21 and differ in bit 30, so the mask must
+      # keep it: without it, 64-bit rbit/clz/rev decode as UDIV/SDIV operands.
+      if (ins & 0x5FE00000) == 0x1AC00000 { do_dp2(ins); return }
+      if (ins & 0x5FE00000) == 0x5AC00000 { do_dp1(ins); return }
+      if (ins & 0x1F000000) == 0x1B000000 { do_dp3(ins); return }
+    }
+    case 14 {
+      if (ins & 0x3B000000) == 0x18000000 { do_ldlit(ins); return }
+      if (ins & 0x3B000000) == 0x39000000 { do_ldst_uimm(ins); return }
+      if (ins & 0x3B200C00) == 0x38200800 { do_ldst_reg(ins); return }
+      if (ins & 0x3B200000) == 0x38000000 { do_ldst_unscaled(ins); return }
+    }
+    else { }
+  }
   bad(ins)
 }
 

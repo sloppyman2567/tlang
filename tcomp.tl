@@ -8,7 +8,7 @@
 #   as --64 -mx86-used-note=no -o FILE.o FILE.s
 #   ld -s -z noseparate-code --build-id=none -o FILE FILE.o
 
-let TLANG_VERSION = "1.1.0"
+let TLANG_VERSION = "1.2.0"
 
 # ---------------------------------------------------------------- token kinds
 let TK_EOF = 0
@@ -62,6 +62,8 @@ let TK_SHLEQ = 51
 let TK_SHREQ = 52
 let TK_INC = 53
 let TK_DEC = 54
+let TK_USHR = 55
+let TK_USHREQ = 56
 
 # ------------------------------------------------------------- keyword ids
 let KW_FN = 1
@@ -81,6 +83,7 @@ let KW_SWITCH = 14
 let KW_CASE = 15
 let KW_DO = 16
 let KW_LOOP = 17
+let KW_CONST = 18
 
 # ---------------------------------------------------------------- compiler state
 let SRC = ""
@@ -130,6 +133,8 @@ let FN_RET = alloc(4000, str)
 let FN_PBASE = alloc(4000)
 let FN_NPARAM = alloc(4000)
 let FN_PTYPE = alloc(24000, str)
+let FN_POS = alloc(4000)
+let FN_LINE = alloc(4000)
 let NPARAM = 0
 
 # Call sites, checked once every definition has been parsed.
@@ -194,13 +199,68 @@ let U_FDPWRITE = 0
 let U_FDSEND = 0
 let U_APPENDFILE = 0
 let U_FILEEXISTS = 0
+let U_ENV = 0
 let U_STROFFSET = 0
 let U_STRDIFF = 0
+let U_CLZ = 0
+let U_RBIT = 0
+let U_BSWAP16 = 0
+let U_BSWAP32 = 0
+let U_BSWAP64 = 0
+let U_SEXT8 = 0
+let U_SEXT16 = 0
+let U_SEXT32 = 0
+let U_UDIV = 0
+let U_UMOD = 0
+let U_ROL8 = 0
+let U_ROR8 = 0
+let U_LD8 = 0
+let U_LD16 = 0
+let U_LD32 = 0
+let U_LD64 = 0
+let U_ST8 = 0
+let U_ST16 = 0
+let U_ST32 = 0
+let U_ST64 = 0
+let U_MEMCPY = 0
+let U_MEMSET = 0
 let U_BOUNDS = 0
+let NO_BOUNDS = 0
+let NTAB = 0
+let NTARGET = 0
+let TAB_LABEL = alloc(32, str)
+let TAB_BASE = alloc(32, int)
+let TAB_COUNT = alloc(32, int)
+let TAB_TARGET = alloc(4096, str)
+# Freestanding mode: _start calls ENTRY_NAME and halts instead of exiting, the
+# kernel runtime supplies print/alloc/exit, and kernel builtins are allowed.
+let FREE_MODE = 0
+let ENTRY_NAME = "main"
+
+# Top-level names are collected before parsing, so a function may name a struct
+# or a global declared later in the file.  The language does not require
+# declaration order at top level, and stage 0 accepts both.
+let PRE_NSTRUCT = 0
+let PRE_SNAME = alloc(1000, str)
+let PRE_SAT = alloc(1000)
+let PRE_NGLOB = 0
+let PRE_GNAME = alloc(4000, str)
+let G_DEFINED = alloc(4000)
+
+# Consts are literals with a name; every use emits the literal, so they need
+# no storage.  The prescan collects them, which is what lets a function use a
+# const declared further down the file.
+let CON_N = 0
+let CON_NAME = alloc(1000, str)
+let CON_KIND = alloc(1000)      # 0 int, 1 string
+let CON_IMM = alloc(1000)
+let CON_LABEL = alloc(1000, str)
+let CON_POS = alloc(1000)
+let CON_LINE = alloc(1000)
 
 # ---------------------------------------------------------------- output helpers
 # The emitter writes one line at a time, but a comparison that feeds a branch is
-# only visible as a sequence, so the last few lines wait in PB. Five is exactly
+# only visible as a sequence, so the last few lines wait in PB. Ten is exactly
 # the window the peephole below needs.
 let PB = alloc(16, str)
 let NPB = 0
@@ -680,7 +740,24 @@ fn norm(s: str) -> str {
   return "  mov eax, " + n
 }
 
+# An unconditional jump makes the next line unreachable.  This is emitted by
+# `if` whose then-branch already returns: the branch's `jmp .Lret` is followed
+# by the jump past the else arm.
+fn rule_dead_jmp() -> int {
+  if has_pre(PB[0], "  jmp ") == 0 {
+    return 0
+  }
+  if has_pre(PB[1], "  jmp ") == 0 {
+    return 0
+  }
+  pb_drop(1)
+  return 1
+}
+
 fn peep() {
+  if rule_dead_jmp() == 1 {
+    return
+  }
   if rule_args() == 1 {
     return
   }
@@ -1064,24 +1141,99 @@ fn lx_number() {
   push_tok(TK_FLOAT, FLT_M, str(FLT_E), LINE)
 }
 
+# One whole UTF-8 character starting at p, so a diagnostic can quote a
+# non-ASCII byte without cutting it in half.
+fn utf8_at(p: int) -> str {
+  let c = SRC[p]
+  let n = 1
+  if c >= 240 {
+    n = 4
+  } else if c >= 224 {
+    n = 3
+  } else if c >= 192 {
+    n = 2
+  }
+  if p + n > len(SRC) {
+    n = 1
+  }
+  return slice(SRC, p, n)
+}
+
+fn esc_known(c: int) -> int {
+  if c == 110 || c == 116 || c == 114 || c == 92 || c == 34 || c == 39 || c == 48 || c == 101 {
+    return 1
+  }
+  return 0
+}
+
+fn hexv(c: int) -> int {
+  if c >= 48 && c <= 57 {
+    return c - 48
+  }
+  if c >= 97 && c <= 102 {
+    return c - 87
+  }
+  if c >= 65 && c <= 70 {
+    return c - 55
+  }
+  return -1
+}
+
+# The byte spelled by the two hex digits at `at`, or -1.  \xNN is the one
+# escape whose length is not fixed at two characters, so the lexer and the
+# assembler escaping both come through here.
+fn esc_byte(s: str, at: int) -> int {
+  if at + 1 >= len(s) {
+    return -1
+  }
+  let hi = hexv(s[at])
+  let lo = hexv(s[at + 1])
+  if hi < 0 || lo < 0 {
+    return -1
+  }
+  return hi * 16 + lo
+}
+
+fn oct3(v: int) -> str {
+  return str(v / 64) + str((v / 8) % 8) + str(v % 8)
+}
+
 fn lx_string() {
   TOK_POS = POS
   let start = POS
+  let sline = LINE
   POS = POS + 1
   while POS < len(SRC) {
     let c = SRC[POS]
     if c == 92 {
-      POS = POS + 2
-    } else {
-      if c == 34 {
-        break
+      if POS + 1 >= len(SRC) {
+        err_at("unterminated string literal", start, sline)
       }
+      if SRC[POS + 1] == 120 {
+        if esc_byte(SRC, POS + 2) < 0 {
+          err_at("\\x needs two hex digits", POS + 2, sline)
+        }
+        POS = POS + 4
+      } else {
+        if esc_known(SRC[POS + 1]) == 0 {
+          err_at("unknown escape '\\" + slice(SRC, POS + 1, 1) + "'", POS + 2, sline)
+        }
+        POS = POS + 2
+      }
+    } else if c == 34 {
+      break
+    } else if c == 10 {
+      err_at("unterminated string literal", POS, sline)
+    } else {
       POS = POS + 1
     }
   }
+  if POS >= len(SRC) {
+    err_at("unterminated string literal", POS, sline)
+  }
   let txt = slice(SRC, start + 1, POS - start - 1)
   POS = POS + 1
-  push_tok(TK_STR, 0, txt, LINE)
+  push_tok(TK_STR, 0, txt, sline)
 }
 
 fn esc_val(c: int) -> int {
@@ -1106,29 +1258,58 @@ fn esc_val(c: int) -> int {
   if c == 48 {
     return 0
   }
+  if c == 101 {
+    return 27
+  }
   return c
 }
 
 fn lx_char() {
   TOK_POS = POS
+  let start = POS
+  let sline = LINE
   POS = POS + 1
+  if POS >= len(SRC) {
+    err_at("unterminated character literal", start, sline)
+  }
   let v = 0
   if SRC[POS] == 92 {
-    v = esc_val(SRC[POS + 1])
-    POS = POS + 2
+    if POS + 1 >= len(SRC) {
+      err_at("unterminated character literal", start, sline)
+    }
+    if SRC[POS + 1] == 120 {
+      v = esc_byte(SRC, POS + 2)
+      if v < 0 {
+        err_at("\\x needs two hex digits", POS + 2, sline)
+      }
+      POS = POS + 4
+    } else {
+      if esc_known(SRC[POS + 1]) == 0 {
+        err_at("unknown escape '\\" + slice(SRC, POS + 1, 1) + "'", POS + 2, sline)
+      }
+      v = esc_val(SRC[POS + 1])
+      POS = POS + 2
+    }
   } else {
+    if SRC[POS] == 10 {
+      err_at("unterminated character literal", start, sline)
+    }
     v = SRC[POS]
     POS = POS + 1
   }
-  if SRC[POS] == 39 {
-    POS = POS + 1
+  if POS >= len(SRC) || SRC[POS] != 39 {
+    err_at("character literal must hold exactly one character", POS, sline)
   }
-  push_tok(TK_INT, v, "", LINE)
+  POS = POS + 1
+  push_tok(TK_INT, v, "", sline)
 }
 
 fn kw_of(w: str) -> int {
   if str_eq(w, "fn") == 1 {
     return KW_FN
+  }
+  if str_eq(w, "const") == 1 {
+    return KW_CONST
   }
   if str_eq(w, "let") == 1 {
     return KW_LET
@@ -1227,6 +1408,16 @@ fn lx_punct() {
   }
   if c == 62 && d == 62 && e == 61 {
     push_tok(TK_SHREQ, 0, "", LINE)
+    POS = POS + 3
+    return
+  }
+  if c == 62 && d == 62 && e == 62 && POS + 3 < len(SRC) && SRC[POS + 3] == 61 {
+    push_tok(TK_USHREQ, 0, "", LINE)
+    POS = POS + 4
+    return
+  }
+  if c == 62 && d == 62 && e == 62 {
+    push_tok(TK_USHR, 0, "", LINE)
     POS = POS + 3
     return
   }
@@ -1369,7 +1560,7 @@ fn lx_punct() {
     k = TK_TILDE
   }
   if k == 0 {
-    err_at("unexpected character", POS, LINE)
+    err_at("unexpected character '" + utf8_at(POS) + "'", POS, LINE)
   }
   push_tok(k, 0, "", LINE)
   POS = POS + 1
@@ -1580,9 +1771,234 @@ fn adv() {
   TI = TI + 1
 }
 
+fn kw_text(w: int) -> str {
+  if w == KW_FN {
+    return "fn"
+  }
+  if w == KW_LET {
+    return "let"
+  }
+  if w == KW_IF {
+    return "if"
+  }
+  if w == KW_ELSE {
+    return "else"
+  }
+  if w == KW_WHILE {
+    return "while"
+  }
+  if w == KW_RETURN {
+    return "return"
+  }
+  if w == KW_BREAK {
+    return "break"
+  }
+  if w == KW_CONTINUE {
+    return "continue"
+  }
+  if w == KW_TRUE {
+    return "true"
+  }
+  if w == KW_FALSE {
+    return "false"
+  }
+  if w == KW_STRUCT {
+    return "struct"
+  }
+  if w == KW_FOR {
+    return "for"
+  }
+  if w == KW_IN {
+    return "in"
+  }
+  if w == KW_SWITCH {
+    return "switch"
+  }
+  if w == KW_CASE {
+    return "case"
+  }
+  if w == KW_DO {
+    return "do"
+  }
+  if w == KW_LOOP {
+    return "loop"
+  }
+  return "const"
+}
+
+fn tok_sym(k: int) -> str {
+  if k == TK_LPAREN {
+    return "("
+  }
+  if k == TK_RPAREN {
+    return ")"
+  }
+  if k == TK_LBRACE {
+    return "{"
+  }
+  if k == TK_RBRACE {
+    return "}"
+  }
+  if k == TK_LBRACKET {
+    return "["
+  }
+  if k == TK_RBRACKET {
+    return "]"
+  }
+  if k == TK_COMMA {
+    return ","
+  }
+  if k == TK_DOT {
+    return "."
+  }
+  if k == TK_COLON {
+    return ":"
+  }
+  if k == TK_ASSIGN {
+    return "="
+  }
+  if k == TK_EQ {
+    return "=="
+  }
+  if k == TK_NE {
+    return "!="
+  }
+  if k == TK_LT {
+    return "<"
+  }
+  if k == TK_LE {
+    return "<="
+  }
+  if k == TK_GT {
+    return ">"
+  }
+  if k == TK_GE {
+    return ">="
+  }
+  if k == TK_ANDAND {
+    return "&&"
+  }
+  if k == TK_OROR {
+    return "||"
+  }
+  if k == TK_NOT {
+    return "!"
+  }
+  if k == TK_SEMI {
+    return ";"
+  }
+  if k == TK_PLUS {
+    return "+"
+  }
+  if k == TK_MINUS {
+    return "-"
+  }
+  if k == TK_STAR {
+    return "*"
+  }
+  if k == TK_SLASH {
+    return "/"
+  }
+  if k == TK_PERCENT {
+    return "%"
+  }
+  if k == TK_ARROW {
+    return "->"
+  }
+  if k == TK_PLUSEQ {
+    return "+="
+  }
+  if k == TK_MINUSEQ {
+    return "-="
+  }
+  if k == TK_STAREQ {
+    return "*="
+  }
+  if k == TK_SLASHEQ {
+    return "/="
+  }
+  if k == TK_PERCENTEQ {
+    return "%="
+  }
+  if k == TK_DOTS {
+    return ".."
+  }
+  if k == TK_AMP {
+    return "&"
+  }
+  if k == TK_PIPE {
+    return "|"
+  }
+  if k == TK_CARET {
+    return "^"
+  }
+  if k == TK_SHL {
+    return "<<"
+  }
+  if k == TK_SHR {
+    return ">>"
+  }
+  if k == TK_TILDE {
+    return "~"
+  }
+  if k == TK_AMPEQ {
+    return "&="
+  }
+  if k == TK_PIPEEQ {
+    return "|="
+  }
+  if k == TK_CARETEQ {
+    return "^="
+  }
+  if k == TK_SHLEQ {
+    return "<<="
+  }
+  if k == TK_SHREQ {
+    return ">>="
+  }
+  if k == TK_USHR {
+    return ">>>"
+  }
+  if k == TK_USHREQ {
+    return ">>>="
+  }
+  if k == TK_INC {
+    return "++"
+  }
+  return "--"
+}
+
+# The token at i as the other compiler's parser describes it, so both report
+# `expected WHAT, found WHAT` for the same mistake.
+fn describe(i: int) -> str {
+  if i >= NT {
+    return "end of file"
+  }
+  let k = TK[i]
+  if k == TK_EOF {
+    return "end of file"
+  }
+  if k == TK_KW {
+    return "'" + kw_text(TN[i]) + "'"
+  }
+  if k == TK_IDENT {
+    return "identifier '" + TV[i] + "'"
+  }
+  if k == TK_INT {
+    return "number " + TN[i]
+  }
+  if k == TK_FLOAT {
+    return "floating-point literal"
+  }
+  if k == TK_STR {
+    return "string literal"
+  }
+  return "'" + tok_sym(k) + "'"
+}
+
 fn expect(k: int) {
   if TK[TI] != k {
-    err("syntax error")
+    err("expected '" + tok_sym(k) + "', found " + describe(TI))
   }
   TI = TI + 1
 }
@@ -1614,7 +2030,10 @@ import "Runtime/builtins_gen.tl"
 
 fn bump(name: str, up: int) {
   if lookup(name) == 0 {
-    err("unknown variable " + name)
+    if const_find(name) >= 0 {
+      err("cannot assign to const '" + name + "'")
+    }
+    err("unknown variable '" + name + "'")
   }
   if GTYPE == "str" {
     err("cannot increment a string")
@@ -1651,6 +2070,9 @@ fn is_compound(k: int) -> int {
     return 1
   }
   if k >= TK_AMPEQ && k <= TK_SHREQ {
+    return 1
+  }
+  if k == TK_USHREQ {
     return 1
   }
   return 0
@@ -1690,7 +2112,10 @@ fn asm_esc(raw: str) -> str {
     if c == 92 {
       i = i + 1
       let x = raw[i]
-      if x == 101 {
+      if x == 120 {
+        out = out + "\\" + oct3(esc_byte(raw, i + 1))
+        i = i + 2
+      } else if x == 101 {
         out = out + "\\033"
       } else if x == 110 {
         out = out + "\\n"
@@ -1756,7 +2181,7 @@ fn bin_level(k: int) -> int {
   if k == TK_LT || k == TK_LE || k == TK_GT || k == TK_GE {
     return 7
   }
-  if k == TK_SHL || k == TK_SHR {
+  if k == TK_SHL || k == TK_SHR || k == TK_USHR {
     return 8
   }
   if k == TK_PLUS || k == TK_MINUS {
@@ -1913,6 +2338,11 @@ fn emit_bin(op: int, lt: str) {
     GTYPE = "int"
     return
   }
+  # Shifts and bitwise operators have no string meaning; a pointer operand is
+  # always a mistake, so report it instead of silently masking the address.
+  if (op == TK_PERCENT || op == TK_AMP || op == TK_PIPE || op == TK_CARET || op == TK_SHL || op == TK_SHR || op == TK_USHR) && (lt == "str" || GTYPE == "str") {
+    err("cannot use '" + bin_op_text(op) + "' on strings")
+  }
   el(rcx)
   el("  pop rax")
   if op == TK_PLUS {
@@ -1962,6 +2392,8 @@ fn emit_bin(op: int, lt: str) {
     el("  shl rax, cl")
   } else if op == TK_SHR {
     el("  sar rax, cl")
+  } else if op == TK_USHR {
+    el("  shr rax, cl")
   } else {
     err("unknown operator")
   }
@@ -1970,10 +2402,10 @@ fn emit_bin(op: int, lt: str) {
 
 fn emit_float_bin(op: int, lt: str) {
   if lt == "str" || GTYPE == "str" {
-    err("cannot mix a float and a string")
+    err("cannot convert str to a float")
   }
-  if op == TK_PERCENT || op == TK_AMP || op == TK_PIPE || op == TK_CARET || op == TK_SHL || op == TK_SHR {
-    err("cannot use a bitwise operator on floats")
+  if op == TK_PERCENT || op == TK_AMP || op == TK_PIPE || op == TK_CARET || op == TK_SHL || op == TK_SHR || op == TK_USHR {
+    err("cannot use '" + bin_op_text(op) + "' on floats")
   }
   if lt == "int" {
     el("  mov rcx, rax")
@@ -2081,6 +2513,9 @@ fn emit_float_bin(op: int, lt: str) {
 }
 
 fn emit_index_check_array() {
+  if NO_BOUNDS == 1 {
+    return
+  }
   let bad = newl()
   let good = newl()
   el("  test rcx, rcx")
@@ -2098,6 +2533,9 @@ fn emit_index_check_array() {
 # upper-bound check would need a strlen on every byte access, and writing at
 # strlen(s) is how NUL-terminated buffers grow.
 fn emit_index_check_string() {
+  if NO_BOUNDS == 1 {
+    return
+  }
   let good = newl()
   el("  test rcx, rcx")
   el("  jns " + good)
@@ -2116,6 +2554,9 @@ fn parse_unary() {
       U_FLOAT = 1
       return
     }
+    if GTYPE == "str" {
+      err("cannot use unary '-' on a string")
+    }
     el("  neg rax")
     GTYPE = "int"
     return
@@ -2124,7 +2565,7 @@ fn parse_unary() {
     adv()
     parse_unary()
     if GTYPE == "float" {
-      err("cannot use ! on a float")
+      err("cannot use unary '!' on a float")
     }
     el("  test rax, rax")
     el("  sete al")
@@ -2136,7 +2577,10 @@ fn parse_unary() {
     adv()
     parse_unary()
     if GTYPE == "float" {
-      err("cannot use ~ on a float")
+      err("cannot use unary '~' on a float")
+    }
+    if GTYPE == "str" {
+      err("cannot use unary '~' on a string")
     }
     el("  not rax")
     GTYPE = "int"
@@ -2177,11 +2621,11 @@ fn parse_postfix() {
       adv()
       let sidx = struct_find(GTYPE)
       if sidx < 0 {
-        err("field access on a value with no struct type")
+        err("cannot read field '" + fname + "' of " + type_article(GTYPE))
       }
       let fi = field_index(sidx, fname)
       if fi < 0 {
-        err("struct has no field " + fname)
+        err("struct '" + GTYPE + "' has no field '" + fname + "'")
       }
       el("  mov rax, [rax + " + (8 * fi) + "]")
       GTYPE = F_TYPE[S_FSTART[sidx] + fi]
@@ -2247,13 +2691,25 @@ fn parse_primary() {
       parse_call(name, namepos, nameline)
       return
     }
-    if lookup(name) == 0 {
-      err("unknown variable " + name)
+    if lookup(name) == 1 {
+      ld(GSLOT)
+      return
     }
-    ld(GSLOT)
+    let ci = const_find(name)
+    if ci >= 0 {
+      if CON_KIND[ci] == 0 {
+        el("  mov rax, " + str(CON_IMM[ci]))
+        GTYPE = "int"
+      } else {
+        el("  lea rax, [rip + " + CON_LABEL[ci] + "]")
+        GTYPE = "str"
+      }
+      return
+    }
+    err("unknown variable '" + name + "'")
     return
   }
-  err("expected an expression")
+  err("expected an expression, found " + describe(TI))
 }
 
 fn array_count() -> int {
@@ -2361,7 +2817,7 @@ fn parse_call(name: str, namepos: int, nameline: int) {
     if fi >= 0 && n < FN_NPARAM[fi] {
       let want = FN_PTYPE[FN_PBASE[fi] + n]
       if types_ok(want, GTYPE) == 0 {
-        err("argument " + (n + 1) + " of " + name + " should be " + type_word(want) + ", got " + type_word(GTYPE))
+        err("function '" + name + "' argument " + (n + 1) + " should be " + type_word(want) + ", got " + type_word(GTYPE))
       }
     }
     el("  push rax")
@@ -2377,7 +2833,7 @@ fn parse_call(name: str, namepos: int, nameline: int) {
     err("too many arguments")
   }
   if fi >= 0 && n != FN_NPARAM[fi] {
-    err(name + " takes " + FN_NPARAM[fi] + " argument(s), got " + n)
+    err("function '" + name + "' takes " + FN_NPARAM[fi] + " argument(s), got " + n)
   }
   let i = n - 1
   while i >= 0 {
@@ -2410,23 +2866,169 @@ fn parse_construct(name: str) {
   }
   expect(TK_RPAREN)
   if i != count {
-    err("wrong number of struct fields")
+    err("struct '" + name + "' has " + count + " field(s), got " + i)
   }
   el("  mov rax, " + loc(t))
   GTYPE = name
 }
 
-fn one_arg() {
+fn one_arg(name: str) {
   adv()
+  if cur_is(TK_RPAREN) == 1 {
+    err(name + "() takes 1 argument(s), got 0")
+  }
   expr()
+  if cur_is(TK_COMMA) == 1 {
+    adv()
+    if cur_is(TK_RPAREN) == 1 {
+      expr()
+    }
+    let extra = 1
+    while cur_is(TK_RPAREN) == 0 {
+      expr()
+      extra = extra + 1
+      if cur_is(TK_COMMA) == 1 {
+        adv()
+        if cur_is(TK_RPAREN) == 1 {
+          expr()
+        }
+      } else {
+        break
+      }
+    }
+    expect(TK_RPAREN)
+    err(name + "() takes 1 argument(s), got " + extra)
+  }
   expect(TK_RPAREN)
 }
 
+# Two integer arguments, the shape shared by the unsigned arithmetic and
+# rotate builtins.  Both values are parked in frame slots before the ABI
+# registers are loaded, so evaluating the second cannot clobber the first.
+fn two_int_args(name: str) {
+  adv()
+  let t0 = tmp()
+  expr()
+  if GTYPE != "" && GTYPE != "int" {
+    err(arg_msg(name, 1, "int"))
+  }
+  st(t0)
+  expect(TK_COMMA)
+  let t1 = tmp()
+  expr()
+  if GTYPE != "" && GTYPE != "int" {
+    err(arg_msg(name, 2, "int"))
+  }
+  st(t1)
+  expect(TK_RPAREN)
+  el("  mov rdi, " + loc(t0))
+  el("  mov rsi, " + loc(t1))
+}
+
+# Two/three typed arguments for the memory builtins.  Values are parked in
+# frame slots before the ABI registers are loaded so later expressions cannot
+# clobber earlier ones.
+fn parse_args2(name: str, k0: str, k1: str) {
+  adv()
+  let t0 = tmp()
+  expr()
+  if GTYPE != "" && GTYPE != k0 {
+    err(arg_msg(name, 1, k0))
+  }
+  st(t0)
+  expect(TK_COMMA)
+  let t1 = tmp()
+  expr()
+  if GTYPE != "" && GTYPE != k1 {
+    err(arg_msg(name, 2, k1))
+  }
+  st(t1)
+  expect(TK_RPAREN)
+  el("  mov rdi, " + loc(t0))
+  el("  mov rsi, " + loc(t1))
+}
+
+fn parse_args3(name: str, k0: str, k1: str, k2: str) {
+  adv()
+  let t0 = tmp()
+  expr()
+  if GTYPE != "" && GTYPE != k0 {
+    err(arg_msg(name, 1, k0))
+  }
+  st(t0)
+  expect(TK_COMMA)
+  let t1 = tmp()
+  expr()
+  if GTYPE != "" && GTYPE != k1 {
+    err(arg_msg(name, 2, k1))
+  }
+  st(t1)
+  expect(TK_COMMA)
+  let t2 = tmp()
+  expr()
+  if GTYPE != "" && GTYPE != k2 {
+    err(arg_msg(name, 3, k2))
+  }
+  st(t2)
+  expect(TK_RPAREN)
+  el("  mov rdi, " + loc(t0))
+  el("  mov rsi, " + loc(t1))
+  el("  mov rdx, " + loc(t2))
+}
+
+# Machine builtins take up to six arguments, like a tlang call, and return an
+# integer.  Their arity and argument kinds come from the generated table, so a
+# new builtin needs no change here; the stub __k_<name> lives in the kernel
+# runtime.
+fn parse_machine(name: str, arity: int) {
+  adv()
+  let slots = alloc(6, str)
+  let i = 0
+  while i < arity {
+    if i > 0 {
+      expect(TK_COMMA)
+    }
+    let t = tmp()
+    expr()
+    let want = builtin_arg(name, i)
+    if types_ok(want, GTYPE) == 0 {
+      err(name + "() argument " + (i + 1) + " should be " + want +
+          ", got " + type_word(GTYPE))
+    }
+    st(t)
+    slots[i] = loc(t)
+    i = i + 1
+  }
+  expect(TK_RPAREN)
+  if arity >= 1 { el("  mov rdi, " + slots[0]) }
+  if arity >= 2 { el("  mov rsi, " + slots[1]) }
+  if arity >= 3 { el("  mov rdx, " + slots[2]) }
+  if arity >= 4 { el("  mov rcx, " + slots[3]) }
+  if arity >= 5 { el("  mov r8, " + slots[4]) }
+  if arity >= 6 { el("  mov r9, " + slots[5]) }
+  el("  call __k_" + name)
+  GTYPE = "int"
+}
+
+fn arg_msg(name: str, n: int, want: str) -> str {
+  return name + "() argument " + n + " should be " + want + ", got " + type_word(GTYPE)
+}
+
 fn parse_builtin(name: str, kind: int) {
+  if builtin_kernel(name) == 1 {
+    if FREE_MODE == 0 {
+      err(name + "() is a kernel builtin; build with --freestanding")
+    }
+    parse_machine(name, builtin_arity(name))
+    return
+  }
+  if builtin_hosted(name) == 1 && FREE_MODE == 1 {
+    err(name + "() needs a hosted Linux program, so it is not available with --freestanding")
+  }
   if kind == 1 {
-    one_arg()
+    one_arg(name)
     if GTYPE != "" && GTYPE != "int" && GTYPE != "str" {
-      err("print() needs a string or an integer")
+      err(arg_msg("print", 1, "str or int"))
     }
     if GTYPE == "int" {
       el("  mov rdi, rax")
@@ -2441,9 +3043,9 @@ fn parse_builtin(name: str, kind: int) {
     return
   }
   if kind == 2 {
-    one_arg()
+    one_arg(name)
     if GTYPE != "" && GTYPE != "int" && GTYPE != "str" {
-      err("print_err() needs a string or an integer")
+      err(arg_msg("print_err", 1, "str or int"))
     }
     if GTYPE == "int" {
       el("  mov rdi, rax")
@@ -2458,9 +3060,9 @@ fn parse_builtin(name: str, kind: int) {
     return
   }
   if kind == 3 {
-    one_arg()
+    one_arg(name)
     if GTYPE != "" && GTYPE != "int" {
-      err("print_int() needs an integer")
+      err(arg_msg("print_int", 1, "int"))
     }
     el("  mov rdi, rax")
     el("  call __t_print_int")
@@ -2469,9 +3071,9 @@ fn parse_builtin(name: str, kind: int) {
     return
   }
   if kind == 4 {
-    one_arg()
+    one_arg(name)
     if GTYPE != "" && GTYPE != "int" {
-      err("print_char() needs an integer")
+      err(arg_msg("print_char", 1, "int"))
     }
     el("  mov rdi, rax")
     el("  call __t_print_char")
@@ -2488,7 +3090,7 @@ fn parse_builtin(name: str, kind: int) {
     return
   }
   if kind == 6 {
-    one_arg()
+    one_arg(name)
     if GTYPE == "float" {
       el("  mov rdi, rax")
       el("  call __t_ftoi")
@@ -2497,7 +3099,7 @@ fn parse_builtin(name: str, kind: int) {
       return
     }
     if GTYPE != "" && GTYPE != "str" {
-      err("int() needs a string or a float")
+      err(arg_msg("int", 1, "str or float"))
     }
     el("  mov rdi, rax")
     el("  call __t_int")
@@ -2506,7 +3108,7 @@ fn parse_builtin(name: str, kind: int) {
     return
   }
   if kind == 7 {
-    one_arg()
+    one_arg(name)
     if GTYPE == "float" {
       el("  mov rdi, rax")
       el("  call __t_ftoa")
@@ -2515,7 +3117,7 @@ fn parse_builtin(name: str, kind: int) {
       return
     }
     if GTYPE != "" && GTYPE != "int" {
-      err("str() needs an integer or a float")
+      err(arg_msg("str", 1, "int or float"))
     }
     el("  mov rdi, rax")
     el("  call __t_itoa")
@@ -2524,7 +3126,19 @@ fn parse_builtin(name: str, kind: int) {
     return
   }
   if kind == 8 {
-    one_arg()
+    adv()
+    if cur_is(TK_RPAREN) == 1 {
+      err("len() takes exactly one argument")
+    }
+    expr()
+    if cur_is(TK_COMMA) == 1 {
+      adv()
+      if cur_is(TK_RPAREN) == 1 {
+        expr()
+      }
+      err("len() takes exactly one argument")
+    }
+    expect(TK_RPAREN)
     if GTYPE == "str" {
       el("  mov rdi, rax")
       el("  call __t_strlen")
@@ -2544,21 +3158,21 @@ fn parse_builtin(name: str, kind: int) {
     let t0 = tmp()
     expr()
     if GTYPE != "" && GTYPE != "str" {
-      err("slice() needs a string")
+      err(arg_msg("slice", 1, "str"))
     }
     st(t0)
     expect(TK_COMMA)
     let t1 = tmp()
     expr()
     if GTYPE != "" && GTYPE != "int" {
-      err("slice() offsets must be integers")
+      err(arg_msg("slice", 2, "int"))
     }
     st(t1)
     expect(TK_COMMA)
     let t2 = tmp()
     expr()
     if GTYPE != "" && GTYPE != "int" {
-      err("slice() offsets must be integers")
+      err(arg_msg("slice", 3, "int"))
     }
     st(t2)
     expect(TK_RPAREN)
@@ -2575,14 +3189,14 @@ fn parse_builtin(name: str, kind: int) {
     let t0 = tmp()
     expr()
     if GTYPE != "" && GTYPE != "str" {
-      err("str_eq() needs two strings")
+      err(arg_msg("str_eq", 1, "str"))
     }
     st(t0)
     expect(TK_COMMA)
     let t1 = tmp()
     expr()
     if GTYPE != "" && GTYPE != "str" {
-      err("str_eq() needs two strings")
+      err(arg_msg("str_eq", 2, "str"))
     }
     st(t1)
     expect(TK_RPAREN)
@@ -2598,15 +3212,18 @@ fn parse_builtin(name: str, kind: int) {
     let t = tmp()
     expr()
     if GTYPE != "" && GTYPE != "int" {
-      err("alloc() needs an integer count")
+      err(arg_msg("alloc", 1, "int"))
     }
     st(t)
     if cur_is(TK_COMMA) == 1 {
       adv()
+      if cur_is(TK_IDENT) == 0 {
+        err("alloc() takes 1 argument(s), got 2")
+      }
       let tname = TV[TI]
       adv()
       if str_eq(tname, "int") == 0 && str_eq(tname, "str") == 0 && str_eq(tname, "float") == 0 && struct_find(tname) < 0 {
-        err("unknown array element type " + tname)
+        err("unknown type '" + tname + "'")
       }
       expect(TK_RPAREN)
       el("  mov rdi, " + loc(t))
@@ -2627,9 +3244,9 @@ fn parse_builtin(name: str, kind: int) {
     return
   }
   if kind == 12 {
-    one_arg()
+    one_arg(name)
     if GTYPE != "" && GTYPE != "str" {
-      err("read_file() needs a string path")
+      err(arg_msg("read_file", 1, "str"))
     }
     el("  mov rdi, rax")
     el("  call __t_read_file")
@@ -2638,9 +3255,9 @@ fn parse_builtin(name: str, kind: int) {
     return
   }
   if kind == 13 {
-    one_arg()
+    one_arg(name)
     if GTYPE != "" && GTYPE != "int" {
-      err("argv() needs an integer index")
+      err(arg_msg("argv", 1, "int"))
     }
     el("  mov rdi, rax")
     el("  call __t_argv")
@@ -2684,9 +3301,9 @@ fn parse_builtin(name: str, kind: int) {
     return
   }
   if kind == 17 {
-    one_arg()
+    one_arg(name)
     if GTYPE != "" && GTYPE != "str" {
-      err("file_size() needs a string path")
+      err(arg_msg("file_size", 1, "str"))
     }
     el("  mov rdi, rax")
     el("  call __t_file_size")
@@ -2695,9 +3312,9 @@ fn parse_builtin(name: str, kind: int) {
     return
   }
   if kind == 18 {
-    one_arg()
+    one_arg(name)
     if GTYPE != "" && GTYPE != "str" {
-      err("sock() needs a string path")
+      err(arg_msg("sock", 1, "str"))
     }
     el("  mov rdi, rax")
     el("  call __t_sock_unix")
@@ -2709,17 +3326,17 @@ fn parse_builtin(name: str, kind: int) {
     adv()
     let a0 = tmp()
     expr()
-    if GTYPE != "" && GTYPE != "int" { err("fd_read() needs an integer descriptor") }
+    if GTYPE != "" && GTYPE != "int" { err(arg_msg("fd_read", 1, "int")) }
     st(a0)
     expect(TK_COMMA)
     let a1 = tmp()
     expr()
-    if GTYPE != "" && GTYPE != "str" { err("fd_read() needs a string buffer") }
+    if GTYPE != "" && GTYPE != "str" { err(arg_msg("fd_read", 2, "str")) }
     st(a1)
     expect(TK_COMMA)
     let a2 = tmp()
     expr()
-    if GTYPE != "" && GTYPE != "int" { err("fd_read() needs an integer length") }
+    if GTYPE != "" && GTYPE != "int" { err(arg_msg("fd_read", 3, "int")) }
     st(a2)
     expect(TK_RPAREN)
     el("  mov rdi, " + loc(a0))
@@ -2734,17 +3351,17 @@ fn parse_builtin(name: str, kind: int) {
     adv()
     let b0 = tmp()
     expr()
-    if GTYPE != "" && GTYPE != "int" { err("fd_write() needs an integer descriptor") }
+    if GTYPE != "" && GTYPE != "int" { err(arg_msg("fd_write", 1, "int")) }
     st(b0)
     expect(TK_COMMA)
     let b1 = tmp()
     expr()
-    if GTYPE != "" && GTYPE != "str" { err("fd_write() needs a string buffer") }
+    if GTYPE != "" && GTYPE != "str" { err(arg_msg("fd_write", 2, "str")) }
     st(b1)
     expect(TK_COMMA)
     let b2 = tmp()
     expr()
-    if GTYPE != "" && GTYPE != "int" { err("fd_write() needs an integer length") }
+    if GTYPE != "" && GTYPE != "int" { err(arg_msg("fd_write", 3, "int")) }
     st(b2)
     expect(TK_RPAREN)
     el("  mov rdi, " + loc(b0))
@@ -2759,12 +3376,12 @@ fn parse_builtin(name: str, kind: int) {
     adv()
     let p0 = tmp()
     expr()
-    if GTYPE != "" && GTYPE != "int" { err("fd_poll() needs an integer descriptor") }
+    if GTYPE != "" && GTYPE != "int" { err(arg_msg("fd_poll", 1, "int")) }
     st(p0)
     expect(TK_COMMA)
     let p1 = tmp()
     expr()
-    if GTYPE != "" && GTYPE != "int" { err("fd_poll() needs an integer timeout") }
+    if GTYPE != "" && GTYPE != "int" { err(arg_msg("fd_poll", 2, "int")) }
     st(p1)
     expect(TK_RPAREN)
     el("  mov rdi, " + loc(p0))
@@ -2779,14 +3396,14 @@ fn parse_builtin(name: str, kind: int) {
     let s0 = tmp()
     expr()
     if GTYPE != "" && GTYPE != "str" {
-      err("str_offset() needs a string")
+      err(arg_msg("str_offset", 1, "str"))
     }
     st(s0)
     expect(TK_COMMA)
     let s1 = tmp()
     expr()
     if GTYPE != "" && GTYPE != "int" {
-      err("str_offset() needs an integer offset")
+      err(arg_msg("str_offset", 2, "int"))
     }
     st(s1)
     expect(TK_RPAREN)
@@ -2802,14 +3419,14 @@ fn parse_builtin(name: str, kind: int) {
     let d0 = tmp()
     expr()
     if GTYPE != "" && GTYPE != "str" {
-      err("str_diff() needs two strings")
+      err(arg_msg("str_diff", 1, "str"))
     }
     st(d0)
     expect(TK_COMMA)
     let d1 = tmp()
     expr()
     if GTYPE != "" && GTYPE != "str" {
-      err("str_diff() needs two strings")
+      err(arg_msg("str_diff", 2, "str"))
     }
     st(d1)
     expect(TK_RPAREN)
@@ -2821,8 +3438,8 @@ fn parse_builtin(name: str, kind: int) {
     return
   }
   if kind == 22 {
-    one_arg()
-    if GTYPE != "" && GTYPE != "int" { err("newbuf() needs an integer size") }
+    one_arg(name)
+    if GTYPE != "" && GTYPE != "int" { err(arg_msg("newbuf", 1, "int")) }
     el("  mov rdi, rax")
     el("  call __t_newbuf")
     U_NEWBUF = 1
@@ -2831,8 +3448,8 @@ fn parse_builtin(name: str, kind: int) {
     return
   }
   if kind == 32 {
-    one_arg()
-    if GTYPE != "" && GTYPE != "int" { err("shm() needs an integer size") }
+    one_arg(name)
+    if GTYPE != "" && GTYPE != "int" { err(arg_msg("shm", 1, "int")) }
     el("  mov rdi, rax")
     el("  call __t_shm")
     U_SHM = 1
@@ -2843,22 +3460,22 @@ fn parse_builtin(name: str, kind: int) {
     adv()
     let q0 = tmp()
     expr()
-    if GTYPE != "" && GTYPE != "int" { err("fd_pwrite() needs an integer descriptor") }
+    if GTYPE != "" && GTYPE != "int" { err(arg_msg("fd_pwrite", 1, "int")) }
     st(q0)
     expect(TK_COMMA)
     let q1 = tmp()
     expr()
-    if GTYPE != "" && GTYPE != "int" { err("fd_pwrite() needs an integer offset") }
+    if GTYPE != "" && GTYPE != "int" { err(arg_msg("fd_pwrite", 2, "int")) }
     st(q1)
     expect(TK_COMMA)
     let q2 = tmp()
     expr()
-    if GTYPE != "" && GTYPE != "str" { err("fd_pwrite() needs a string buffer") }
+    if GTYPE != "" && GTYPE != "str" { err(arg_msg("fd_pwrite", 3, "str")) }
     st(q2)
     expect(TK_COMMA)
     let q3 = tmp()
     expr()
-    if GTYPE != "" && GTYPE != "int" { err("fd_pwrite() needs an integer length") }
+    if GTYPE != "" && GTYPE != "int" { err(arg_msg("fd_pwrite", 4, "int")) }
     st(q3)
     expect(TK_RPAREN)
     el("  mov rdi, " + loc(q0))
@@ -2874,22 +3491,22 @@ fn parse_builtin(name: str, kind: int) {
     adv()
     let v0 = tmp()
     expr()
-    if GTYPE != "" && GTYPE != "int" { err("fd_send() needs an integer descriptor") }
+    if GTYPE != "" && GTYPE != "int" { err(arg_msg("fd_send", 1, "int")) }
     st(v0)
     expect(TK_COMMA)
     let v1 = tmp()
     expr()
-    if GTYPE != "" && GTYPE != "str" { err("fd_send() needs a string buffer") }
+    if GTYPE != "" && GTYPE != "str" { err(arg_msg("fd_send", 2, "str")) }
     st(v1)
     expect(TK_COMMA)
     let v2 = tmp()
     expr()
-    if GTYPE != "" && GTYPE != "int" { err("fd_send() needs an integer length") }
+    if GTYPE != "" && GTYPE != "int" { err(arg_msg("fd_send", 3, "int")) }
     st(v2)
     expect(TK_COMMA)
     let v3 = tmp()
     expr()
-    if GTYPE != "" && GTYPE != "int" { err("fd_send() needs an integer descriptor to pass") }
+    if GTYPE != "" && GTYPE != "int" { err(arg_msg("fd_send", 4, "int")) }
     st(v3)
     expect(TK_RPAREN)
     el("  mov rdi, " + loc(v0))
@@ -2910,9 +3527,9 @@ fn parse_builtin(name: str, kind: int) {
     return
   }
   if kind == 24 {
-    one_arg()
+    one_arg(name)
     if GTYPE != "" && GTYPE != "int" {
-      err("arena_release() needs an integer mark")
+      err(arg_msg("arena_release", 1, "int"))
     }
     el("  mov rdi, rax")
     el("  call __t_arena_release")
@@ -2925,14 +3542,14 @@ fn parse_builtin(name: str, kind: int) {
     let f0 = tmp()
     expr()
     if GTYPE != "" && GTYPE != "str" {
-      err("write_file() needs a string path")
+      err(arg_msg("write_file", 1, "str"))
     }
     st(f0)
     expect(TK_COMMA)
     let f1 = tmp()
     expr()
     if GTYPE != "" && GTYPE != "str" {
-      err("write_file() needs string data")
+      err(arg_msg("write_file", 2, "str"))
     }
     st(f1)
     expect(TK_RPAREN)
@@ -2948,14 +3565,14 @@ fn parse_builtin(name: str, kind: int) {
     let g0 = tmp()
     expr()
     if GTYPE != "" && GTYPE != "str" {
-      err("append_file() needs a string path")
+      err(arg_msg("append_file", 1, "str"))
     }
     st(g0)
     expect(TK_COMMA)
     let g1 = tmp()
     expr()
     if GTYPE != "" && GTYPE != "str" {
-      err("append_file() needs string data")
+      err(arg_msg("append_file", 2, "str"))
     }
     st(g1)
     expect(TK_RPAREN)
@@ -2967,9 +3584,9 @@ fn parse_builtin(name: str, kind: int) {
     return
   }
   if kind == 27 {
-    one_arg()
+    one_arg(name)
     if GTYPE != "" && GTYPE != "str" {
-      err("file_exists() needs a string path")
+      err(arg_msg("file_exists", 1, "str"))
     }
     el("  mov rdi, rax")
     el("  call __t_file_exists")
@@ -2977,22 +3594,119 @@ fn parse_builtin(name: str, kind: int) {
     GTYPE = "int"
     return
   }
+  if kind == 72 {
+    one_arg(name)
+    if GTYPE != "" && GTYPE != "str" {
+      err(arg_msg("env", 1, "str"))
+    }
+    el("  mov rdi, rax")
+    el("  call __t_env")
+    U_ENV = 1
+    GTYPE = "str"
+    return
+  }
+  if kind >= 73 && kind <= 80 {
+    let nm = ""
+    if kind == 73 { nm = "clz" }
+    if kind == 74 { nm = "rbit" }
+    if kind == 75 { nm = "bswap16" }
+    if kind == 76 { nm = "bswap32" }
+    if kind == 77 { nm = "bswap64" }
+    if kind == 78 { nm = "sext8" }
+    if kind == 79 { nm = "sext16" }
+    if kind == 80 { nm = "sext32" }
+    one_arg(nm)
+    if GTYPE != "" && GTYPE != "int" {
+      err(arg_msg(nm, 1, "int"))
+    }
+    el("  mov rdi, rax")
+    el("  call __t_" + nm)
+    if kind == 73 { U_CLZ = 1 }
+    if kind == 74 { U_RBIT = 1 }
+    if kind == 75 { U_BSWAP16 = 1 }
+    if kind == 76 { U_BSWAP32 = 1 }
+    if kind == 77 { U_BSWAP64 = 1 }
+    if kind == 78 { U_SEXT8 = 1 }
+    if kind == 79 { U_SEXT16 = 1 }
+    if kind == 80 { U_SEXT32 = 1 }
+    GTYPE = "int"
+    return
+  }
+  if kind >= 81 && kind <= 84 {
+    let nm2 = ""
+    if kind == 81 { nm2 = "udiv" }
+    if kind == 82 { nm2 = "umod" }
+    if kind == 83 { nm2 = "rol8" }
+    if kind == 84 { nm2 = "ror8" }
+    two_int_args(nm2)
+    el("  call __t_" + nm2)
+    if kind == 81 { U_UDIV = 1 }
+    if kind == 82 { U_UMOD = 1 }
+    if kind == 83 { U_ROL8 = 1 }
+    if kind == 84 { U_ROR8 = 1 }
+    GTYPE = "int"
+    return
+  }
+  if kind >= 85 && kind <= 88 {
+    let ln = ""
+    if kind == 85 { ln = "ld8" }
+    if kind == 86 { ln = "ld16" }
+    if kind == 87 { ln = "ld32" }
+    if kind == 88 { ln = "ld64" }
+    parse_args2(ln, "str", "int")
+    el("  call __t_" + ln)
+    if kind == 85 { U_LD8 = 1 }
+    if kind == 86 { U_LD16 = 1 }
+    if kind == 87 { U_LD32 = 1 }
+    if kind == 88 { U_LD64 = 1 }
+    GTYPE = "int"
+    return
+  }
+  if kind >= 89 && kind <= 92 {
+    let sn = ""
+    if kind == 89 { sn = "st8" }
+    if kind == 90 { sn = "st16" }
+    if kind == 91 { sn = "st32" }
+    if kind == 92 { sn = "st64" }
+    parse_args3(sn, "str", "int", "int")
+    el("  call __t_" + sn)
+    if kind == 89 { U_ST8 = 1 }
+    if kind == 90 { U_ST16 = 1 }
+    if kind == 91 { U_ST32 = 1 }
+    if kind == 92 { U_ST64 = 1 }
+    GTYPE = "int"
+    return
+  }
+  if kind == 93 {
+    parse_args3("memcpy", "str", "str", "int")
+    el("  call __t_memcpy")
+    U_MEMCPY = 1
+    GTYPE = "int"
+    return
+  }
+  if kind == 94 {
+    parse_args3("memset", "str", "int", "int")
+    el("  call __t_memset")
+    U_MEMSET = 1
+    GTYPE = "int"
+    return
+  }
   if kind == 28 {
-    one_arg()
+    one_arg(name)
     if GTYPE == "int" {
       el("  mov rdi, rax")
       el("  call __t_itof")
       U_FLOAT = 1
     } else if GTYPE != "" && GTYPE != "float" {
-      err("float() needs an integer or a float")
+      err(arg_msg("float", 1, "int or float"))
     }
     GTYPE = "float"
     return
   }
   if kind == 29 {
-    one_arg()
+    one_arg(name)
     if GTYPE != "" && GTYPE != "float" {
-      err("print_float() needs a float")
+      err(arg_msg("print_float", 1, "float"))
     }
     el("  mov rdi, rax")
     el("  call __t_print_float")
@@ -3006,9 +3720,9 @@ fn parse_builtin(name: str, kind: int) {
     return
   }
   if kind == 30 {
-    one_arg()
+    one_arg(name)
     if GTYPE != "" && GTYPE != "float" {
-      err("sqrt() needs a float")
+      err(arg_msg("sqrt", 1, "float"))
     }
     el("  mov rdi, rax")
     el("  call __t_fsqrt")
@@ -3017,9 +3731,9 @@ fn parse_builtin(name: str, kind: int) {
     return
   }
   if kind == 31 {
-    one_arg()
+    one_arg(name)
     if GTYPE != "" && GTYPE != "float" {
-      err("fabs() needs a float")
+      err(arg_msg("fabs", 1, "float"))
     }
     el("  mov rdi, rax")
     el("  call __t_fabs")
@@ -3027,9 +3741,9 @@ fn parse_builtin(name: str, kind: int) {
     GTYPE = "float"
     return
   }
-  one_arg()
+  one_arg(name)
   if GTYPE != "" && GTYPE != "int" {
-    err("exit() needs an integer status")
+    err(arg_msg("exit", 1, "int"))
   }
   el("  mov rdi, rax")
   el("  call __t_exit")
@@ -3061,14 +3775,32 @@ fn parse_switch() {
   adv()
   expr()
   let ty = GTYPE
-  if ty != "" && str_eq(ty, "int") == 0 && str_eq(ty, "str") == 0 {
-    err("switch needs an int or a string")
+  if str_eq(ty, "float") == 1 {
+    err("switch does not support float values")
   }
-  let s = tmp()
-  st(s)
+  if ty != "" && str_eq(ty, "int") == 0 && str_eq(ty, "str") == 0 {
+    err("switch needs integer or string case values")
+  }
+  # Case bodies can reuse temporaries, so the selector lives in a dedicated
+  # global slot until the deferred dispatch reads it back.
+  el("  mov [rip + __t_switch_val], rax")
   skip_semis()
-  expect(TK_LBRACE)
+  if cur_is(TK_LBRACE) == 0 {
+    err("expected '{' after the switch value, found " + describe(TI))
+  }
+  adv()
+
+  # Bodies are emitted first; a jump over them reaches the dispatch built at
+  # the end, once every case value and its body label are known.
   let end = newl()
+  let disp = newl()
+  el("  jmp " + disp)
+  let cv = alloc(512, int)
+  let cl = alloc(512, str)
+  let cb = alloc(512, str)
+  let nd = 0
+  let deflab = ""
+  let has_def = 0
   while cur_is(TK_RBRACE) == 0 && cur_is(TK_EOF) == 0 {
     skip_semis()
     if cur_is(TK_RBRACE) == 1 {
@@ -3084,20 +3816,20 @@ fn parse_switch() {
         }
       }
       let body = newl()
-      let next = newl()
       while 1 {
+        if nd >= 512 {
+          err("too many switch cases")
+        }
         if str_eq(ty, "str") == 1 {
           if cur_is(TK_STR) == 0 {
-            err("case value for a string switch must be a string")
+            if cur_is(TK_INT) == 1 || cur_is(TK_MINUS) == 1 {
+              err("switch on str cannot match int case values")
+            }
+            err("expected a number or string literal after 'case', found " + describe(TI))
           }
-          let lb = intern(TV[TI])
+          cl[nd] = intern(TV[TI])
+          cv[nd] = 0
           adv()
-          el("  lea rsi, [rip + " + lb + "]")
-          el("  mov rdi, " + loc(s))
-          el("  call __t_str_eq")
-          U_STREQ = 1
-          el("  test rax, rax")
-          el("  jne " + body)
         } else {
           let neg = 0
           if cur_is(TK_MINUS) == 1 {
@@ -3105,18 +3837,21 @@ fn parse_switch() {
             adv()
           }
           if cur_is(TK_INT) == 0 {
-            err("case value for an integer switch must be a number")
+            if cur_is(TK_STR) == 1 {
+              err("switch on int cannot match str case values")
+            }
+            err("expected a number or string literal after 'case', found " + describe(TI))
           }
           let v = TN[TI]
           if neg == 1 {
             v = 0 - v
           }
           adv()
-          el("  mov rax, " + v)
-          el("  mov rcx, " + loc(s))
-          el("  cmp rcx, rax")
-          el("  je " + body)
+          cv[nd] = v
+          cl[nd] = ""
         }
+        cb[nd] = body
+        nd = nd + 1
         if cur_is(TK_COMMA) == 1 {
           adv()
         } else {
@@ -3124,29 +3859,119 @@ fn parse_switch() {
         }
       }
       skip_semis()
-      el("  jmp " + next)
       el(body + ":")
       push_loop(end, "")
       parse_block()
       NLOOP = NLOOP - 1
       el("  jmp " + end)
-      el(next + ":")
       continue
     }
     if cur_kw(KW_ELSE) == 1 {
       adv()
       skip_semis()
+      deflab = newl()
+      has_def = 1
+      el(deflab + ":")
+      push_loop(end, "")
       parse_block()
+      NLOOP = NLOOP - 1
+      el("  jmp " + end)
       continue
     }
     err("expected 'case' or 'else' in a switch")
   }
   expect(TK_RBRACE)
+
+  let fallback = end
+  if has_def == 1 {
+    fallback = deflab
+  }
+  el(disp + ":")
+
+  # A dense integer switch becomes one range check and an indirect jump.
+  let used = 0
+  if str_eq(ty, "int") == 1 && nd >= 4 {
+    let lo = cv[0]
+    let hi = cv[0]
+    let i = 0
+    while i < nd {
+      if cv[i] < lo { lo = cv[i] }
+      if cv[i] > hi { hi = cv[i] }
+      i = i + 1
+    }
+    i = 0
+    while i < nd {
+      let dup = 0
+      let j = 0
+      while j < i {
+        if cv[j] == cv[i] { dup = 1 }
+        j = j + 1
+      }
+      if dup == 0 { used = used + 1 }
+      i = i + 1
+    }
+    let span = hi - lo
+    let limit = 4 * used
+    if limit > 4096 { limit = 4096 }
+    if used >= 4 && span >= 0 && span <= limit {
+      let tbl = "T" + NTAB
+      TAB_LABEL[NTAB] = tbl
+      TAB_BASE[NTAB] = NTARGET
+      NTAB = NTAB + 1
+      i = 0
+      while i <= span {
+        let v = lo + i
+        let target = fallback
+        let k = 0
+        while k < nd {
+          if cv[k] == v { target = cb[k] }
+          k = k + 1
+        }
+        TAB_TARGET[NTARGET] = target
+        NTARGET = NTARGET + 1
+        i = i + 1
+      }
+      TAB_COUNT[NTAB - 1] = span + 1
+      el("  mov rax, [rip + __t_switch_val]")
+      if lo != 0 {
+        el("  sub rax, " + lo)
+      }
+      el("  cmp rax, " + span)
+      el("  ja " + fallback)
+      el("  lea rdx, [rip + " + tbl + "]")
+      el("  jmp qword ptr [rdx + rax*8]")
+      el(end + ":")
+      return
+    }
+  }
+
+  # Sparse or string switches keep the compare chain.
+  let i = 0
+  while i < nd {
+    if str_eq(cl[i], "") == 1 {
+      el("  mov rax, " + cv[i])
+      el("  mov rcx, [rip + __t_switch_val]")
+      el("  cmp rcx, rax")
+      el("  je " + cb[i])
+    } else {
+      el("  lea rsi, [rip + " + cl[i] + "]")
+      el("  mov rdi, [rip + __t_switch_val]")
+      el("  call __t_str_eq")
+      U_STREQ = 1
+      el("  test rax, rax")
+      el("  jne " + cb[i])
+    }
+    i = i + 1
+  }
+  el("  jmp " + fallback)
   el(end + ":")
 }
 
 fn parse_stmt() {
   rt()
+  if cur_kw(KW_FN) == 1 || cur_kw(KW_STRUCT) == 1 || cur_kw(KW_ELSE) == 1 || cur_kw(KW_CASE) == 1 {
+    err("'" + kw_text(TN[TI]) + "' is not allowed here")
+  }
   if cur_is(TK_INC) == 1 || cur_is(TK_DEC) == 1 {
     let up = 1
     if cur_is(TK_DEC) == 1 {
@@ -3213,7 +4038,7 @@ fn parse_stmt() {
   if cur_kw(KW_BREAK) == 1 {
     adv()
     if NLOOP == 0 {
-      err("break outside a loop")
+      err("'break' outside of a loop")
     }
     el("  jmp " + LBREAK[NLOOP - 1])
     return
@@ -3229,7 +4054,7 @@ fn parse_stmt() {
       i = i - 1
     }
     if target == "" {
-      err("continue outside a loop")
+      err("'continue' outside of a loop")
     }
     el("  jmp " + target)
     return
@@ -3239,10 +4064,24 @@ fn parse_stmt() {
     return
   }
   expr()
+  # A compound assignment or increment whose target is not a plain variable
+  # parses as an expression first; name the real problem here.
+  if is_compound(TK[TI]) == 1 {
+    err("'" + assign_op_text(TK[TI]) + "=' needs a plain variable on the left")
+  }
+  if cur_is(TK_INC) == 1 || cur_is(TK_DEC) == 1 {
+    if cur_is(TK_INC) == 1 {
+      err("'++' needs a plain variable")
+    }
+    err("'--' needs a plain variable")
+  }
 }
 
 fn parse_let() {
   adv()
+  if cur_is(TK_IDENT) == 0 {
+    err("expected a variable name, found " + describe(TI))
+  }
   let name = TV[TI]
   adv()
   expect(TK_ASSIGN)
@@ -3260,7 +4099,10 @@ fn parse_assign() {
   let name = TV[TI]
   adv()
   if lookup(name) == 0 {
-    err("unknown variable " + name)
+    if const_find(name) >= 0 {
+      err("cannot assign to const '" + name + "'")
+    }
+    err("unknown variable '" + name + "'")
   }
   let s = GSLOT
   let t = GTYPE
@@ -3268,6 +4110,33 @@ fn parse_assign() {
     let op = TK[TI]
     adv()
     expr()
+    if t == "str" {
+      # `s += x` concatenates, exactly like `s = s + x`; the other compound
+      # operators have no string meaning.
+      if op != TK_PLUSEQ {
+        err("cannot use '" + assign_op_text(op) + "' on strings")
+      }
+      if GTYPE == "float" {
+        err("cannot concatenate a float to a string")
+      }
+      el("  mov rcx, rax")
+      el("  mov rax, " + loc(s))
+      if GTYPE == "int" {
+        el("  push rax")
+        el("  mov rdi, rcx")
+        el("  call __t_itoa")
+        el("  mov rcx, rax")
+        el("  pop rax")
+        U_ITOA = 1
+      }
+      el("  mov rdi, rax")
+      el("  mov rsi, rcx")
+      el("  call __t_concat")
+      U_CONCAT = 1
+      st(s)
+      set_type(name, "str")
+      return
+    }
     if is_ptr_type(t) == 1 {
       if op != TK_PLUSEQ && op != TK_MINUSEQ {
         err("pointer arithmetic needs += or -=")
@@ -3342,6 +4211,8 @@ fn parse_assign() {
       el("  shl rax, cl")
     } else if op == TK_SHREQ {
       el("  sar rax, cl")
+    } else if op == TK_USHREQ {
+      el("  shr rax, cl")
     } else {
       el("  cqo")
       el("  idiv rcx")
@@ -3368,48 +4239,72 @@ fn parse_assign() {
     }
     return
   }
-  if cur_is(TK_LBRACKET) == 1 {
-    adv()
+  if cur_is(TK_LBRACKET) == 1 || cur_is(TK_DOT) == 1 {
+    # Any chain of index and field steps, so `a[i].f = v` and `o.a.v = v`
+    # store where the same chain would read. The address is walked into rax;
+    # each step leaves the element's address there and updates its type.
     el("  mov rax, " + loc(s))
-    el("  push rax")
-    expr()
-    el("  push rax")
-    expect(TK_RBRACKET)
-    expect(TK_ASSIGN)
-    expr()
-    el("  mov rdx, rax")
-    el("  pop rcx")
-    el("  pop rax")
-    if t == "str" {
-      emit_index_check_string()
-      el("  mov byte ptr [rax + rcx], dl")
-    } else {
-      if t == "arr" || has_arr_prefix(t) == 1 {
-        emit_index_check_array()
+    let byte = 0
+    while cur_is(TK_LBRACKET) == 1 || cur_is(TK_DOT) == 1 {
+      if cur_is(TK_LBRACKET) == 1 {
+        adv()
+        el("  push rax")
+        expr()
+        el("  mov rcx, rax")
+        el("  pop rax")
+        if str_eq(t, "str") == 1 {
+          emit_index_check_string()
+          el("  add rax, rcx")
+          t = "int"
+          byte = 1
+        } else {
+          if str_eq(t, "arr") == 1 || has_arr_prefix(t) == 1 {
+            emit_index_check_array()
+          }
+          el("  lea rax, [rax + rcx*8]")
+          byte = 0
+          if has_arr_prefix(t) == 1 {
+            t = elem_of(t)
+          } else {
+            t = "int"
+          }
+        }
+        expect(TK_RBRACKET)
+      } else {
+        adv()
+        let fname = TV[TI]
+        adv()
+        let sidx = struct_find(t)
+        if sidx < 0 {
+          err("cannot read field '" + fname + "' of " + type_article(t))
+        }
+        let fi = field_index(sidx, fname)
+        if fi < 0 {
+          err("struct '" + t + "' has no field '" + fname + "'")
+        }
+        el("  add rax, " + (8 * fi))
+        t = F_TYPE[S_FSTART[sidx] + fi]
+        byte = 0
       }
-      el("  mov [rax + rcx*8], rdx")
+      if cur_is(TK_LBRACKET) == 1 || cur_is(TK_DOT) == 1 {
+        # A step that is not the last one holds a pointer to the next object;
+        # only the last step's address is stored through.
+        el("  mov rax, [rax]")
+      }
     }
-    return
-  }
-  if cur_is(TK_DOT) == 1 {
-    adv()
-    let fname = TV[TI]
-    adv()
-    let sidx = struct_find(t)
-    if sidx < 0 {
-      err("field assignment on a value with no struct type")
-    }
-    let fi = field_index(sidx, fname)
-    if fi < 0 {
-      err("struct has no field " + fname)
+    if is_compound(TK[TI]) == 1 {
+      err("'" + assign_op_text(TK[TI]) + "=' needs a plain variable on the left")
     }
     expect(TK_ASSIGN)
-    el("  mov rax, " + loc(s))
     el("  push rax")
     expr()
     el("  mov rdx, rax")
     el("  pop rax")
-    el("  mov [rax + " + (8 * fi) + "], rdx")
+    if byte == 1 {
+      el("  mov byte ptr [rax], dl")
+    } else {
+      el("  mov [rax], rdx")
+    }
     return
   }
   err("bad assignment")
@@ -3465,7 +4360,7 @@ fn parse_do() {
   NLOOP = NLOOP - 1
   skip_semis()
   if cur_kw(KW_WHILE) == 0 {
-    err("expected 'while' after the do block")
+    err("expected 'while', found " + describe(TI))
   }
   adv()
   el(cont + ":")
@@ -3494,10 +4389,13 @@ fn parse_loop() {
 # elements; the collection and its length are read once.
 fn parse_for() {
   adv()
+  if cur_is(TK_IDENT) == 0 {
+    err("expected a loop variable, found " + describe(TI))
+  }
   let name = TV[TI]
   adv()
   if cur_kw(KW_IN) == 0 {
-    err("expected 'in' after the loop variable")
+    err("expected 'in', found " + describe(TI))
   }
   adv()
   expr()
@@ -3583,7 +4481,7 @@ fn parse_return() {
   } else {
     expr()
     if types_ok(CUR_RET, GTYPE) == 0 {
-      err("function " + CURFN + " returns " + type_word(CUR_RET) + ", got " + type_word(GTYPE))
+      err("'" + CURFN + "' returns " + type_word(CUR_RET) + ", but this return gives " + type_word(GTYPE))
     }
     if str_eq(CUR_RET, "") == 1 && str_eq(CUR_INFER, "") == 1 {
       if str_eq(GTYPE, "") == 0 {
@@ -3594,51 +4492,363 @@ fn parse_return() {
   el("  jmp .Lret_" + CURFN)
 }
 
-# ---------------------------------------------------------------- declarations
-fn parse_struct() {
-  adv()
-  let name = TV[TI]
-  if struct_find(name) >= 0 {
-    err("struct '" + name + "' is defined twice")
+# ---------------------------------------------------------------- prescan
+# A struct name may be used in an annotation before its declaration; collect
+# the top-level names first so the annotations can be checked in one pass.
+fn pre_struct_find(name: str) -> int {
+  let i = 0
+  while i < PRE_NSTRUCT {
+    if str_eq(PRE_SNAME[i], name) == 1 {
+      return i
+    }
+    i = i + 1
   }
-  adv()
-  expect(TK_LBRACE)
+  return -1
+}
+
+fn pre_global_find(name: str) -> int {
+  let i = 0
+  while i < PRE_NGLOB {
+    if str_eq(PRE_GNAME[i], name) == 1 {
+      return i
+    }
+    i = i + 1
+  }
+  return -1
+}
+
+# Report at token i, or at the end of file when i is past the last token.
+fn err_tok(msg: str, i: int) {
+  if i >= NT {
+    err_at(msg, TP[NT - 1], TL[NT - 1])
+  }
+  err_at(msg, TP[i], TL[i])
+}
+
+fn skip_semis_at(i: int) -> int {
+  while i < NT && TK[i] == TK_SEMI {
+    i = i + 1
+  }
+  return i
+}
+
+fn prescan_struct(s: int) {
+  let at = PRE_SAT[s]
+  let name = PRE_SNAME[s]
+  let spos = TP[at]
+  let sline = TL[at]
+  if at + 1 >= NT || TK[at + 1] != TK_IDENT {
+    err_tok("expected a struct name, found " + describe(at + 1), at + 1)
+  }
+  if struct_find(name) >= 0 {
+    err_at("struct '" + name + "' defined twice", spos, sline)
+  }
+  if builtin_kind(name) != 0 {
+    err_at("struct name '" + name + "' is a builtin", spos, sline)
+  }
   if NSTRUCT >= 1000 {
-    err("too many structs")
+    err_at("too many structs", spos, sline)
   }
   let sidx = NSTRUCT
   NSTRUCT = NSTRUCT + 1
   S_NAME[sidx] = name
   S_FSTART[sidx] = NFIELD
-  while cur_is(TK_RBRACE) == 0 && cur_is(TK_EOF) == 0 {
-    if cur_is(TK_SEMI) == 1 {
-      adv()
-    } else if cur_is(TK_COMMA) == 1 {
-      adv()
-    } else {
-      let fname = TV[TI]
-      adv()
+  let i = at + 2
+  if i >= NT || TK[i] != TK_LBRACE {
+    err_tok("expected '{', found " + describe(i), i)
+  }
+  i = i + 1
+  # Fields are comma-separated, matching stage 0: a newline between two fields
+  # is not a separator, so `{ a b }` is an error rather than two fields.
+  if i < NT && TK[i] != TK_RBRACE {
+    while 1 {
+      i = skip_semis_at(i)
+      if i >= NT || TK[i] != TK_IDENT {
+        err_tok("expected a field name, found " + describe(i), i)
+      }
+      let fname = TV[i]
+      i = i + 1
       let ftype = ""
-      if cur_is(TK_COLON) == 1 {
-        adv()
-        ftype = TV[TI]
-        adv()
-        if cur_is(TK_LBRACKET) == 1 {
-          adv()
-          expect(TK_RBRACKET)
+      if i < NT && TK[i] == TK_COLON {
+        i = i + 1
+        if i >= NT || TK[i] != TK_IDENT {
+          err_tok("expected a type name, found " + describe(i), i)
+        }
+        ftype = TV[i]
+        i = i + 1
+        if i < NT && TK[i] == TK_LBRACKET {
+          i = i + 1
+          if i >= NT || TK[i] != TK_RBRACKET {
+            err_tok("expected ']' after an array type, found " + describe(i), i)
+          }
+          i = i + 1
           ftype = ftype + "[]"
         }
       }
+      if type_known(norm_type(ftype)) == 0 {
+        err_at("unknown type '" + ftype + "' for field '" + fname + "'", spos, sline)
+      }
+      if field_dup(sidx, fname) == 1 {
+        err_at("struct '" + name + "' has duplicate fields", spos, sline)
+      }
       if NFIELD >= 8000 {
-        err("too many struct fields")
+        err_at("too many struct fields", spos, sline)
       }
       F_NAME[NFIELD] = fname
       F_TYPE[NFIELD] = norm_type(ftype)
       NFIELD = NFIELD + 1
+      i = skip_semis_at(i)
+      if i >= NT || TK[i] != TK_COMMA {
+        break
+      }
+      i = i + 1
+      i = skip_semis_at(i)
+      if i < NT && TK[i] == TK_RBRACE {
+        break
+      }
     }
   }
-  expect(TK_RBRACE)
+  if i >= NT || TK[i] != TK_RBRACE {
+    err_tok("expected '}', found " + describe(i), i)
+  }
   S_FCOUNT[sidx] = NFIELD - S_FSTART[sidx]
+}
+
+fn con_add(name: str, kind: int, imm: int, label: str, pos: int, line: int) {
+  # One name per const: a second declaration is a mistake, not a shadow.
+
+  let i = 0
+  while i < CON_N {
+    if str_eq(CON_NAME[i], name) == 1 {
+      err_at("const '" + name + "' defined twice", pos, line)
+    }
+    i = i + 1
+  }
+  if CON_N >= 1000 {
+    err_at("too many consts", pos, line)
+  }
+  CON_NAME[CON_N] = name
+  CON_KIND[CON_N] = kind
+  CON_IMM[CON_N] = imm
+  CON_LABEL[CON_N] = label
+  CON_POS[CON_N] = pos
+  CON_LINE[CON_N] = line
+  CON_N = CON_N + 1
+}
+
+fn const_find(name: str) -> int {
+  let i = 0
+  while i < CON_N {
+    if str_eq(CON_NAME[i], name) == 1 {
+      return i
+    }
+    i = i + 1
+  }
+  return 0 - 1
+}
+
+fn prescan() {
+  PRE_NSTRUCT = 0
+  CON_N = 0
+  PRE_NGLOB = 0
+  let depth = 0
+  let i = 0
+  while i < NT {
+    if TK[i] == TK_LBRACE {
+      depth = depth + 1
+    } else if TK[i] == TK_RBRACE {
+      if depth > 0 {
+        depth = depth - 1
+      }
+    } else if depth == 0 && TK[i] == TK_KW && i + 1 < NT {
+      if TN[i] == KW_STRUCT && PRE_NSTRUCT < 1000 {
+        PRE_SNAME[PRE_NSTRUCT] = ""
+        if i + 1 < NT {
+          PRE_SNAME[PRE_NSTRUCT] = TV[i + 1]
+        }
+        PRE_SAT[PRE_NSTRUCT] = i
+        PRE_NSTRUCT = PRE_NSTRUCT + 1
+      } else if TN[i] == KW_LET && PRE_NGLOB < 4000 {
+        PRE_GNAME[PRE_NGLOB] = ""
+        if i + 1 < NT {
+          PRE_GNAME[PRE_NGLOB] = TV[i + 1]
+        }
+        PRE_NGLOB = PRE_NGLOB + 1
+      } else if TN[i] == KW_CONST && CON_N < 1000 {
+        # A const is a literal, so the prescan can evaluate it without the
+        # parser: name, '=', an optional '-', then an int or string token.
+        if i + 3 < NT && TK[i + 1] == TK_IDENT && TK[i + 2] == TK_ASSIGN {
+          let j = i + 3
+          let sign = 1
+          if j < NT && TK[j] == TK_MINUS {
+            sign = 0 - 1
+            j = j + 1
+          }
+          if j < NT && TK[j] == TK_INT {
+            con_add(TV[i + 1], 0, sign * TN[j], "", TP[i], TL[i])
+          } else if j < NT && TK[j] == TK_STR && sign == 1 {
+            con_add(TV[i + 1], 1, 0, intern(TV[j]), TP[i], TL[i])
+          }
+        }
+      }
+    }
+    i = i + 1
+  }
+  let c = 0
+  while c < CON_N {
+    let g = 0
+    while g < PRE_NGLOB {
+      if str_eq(PRE_GNAME[g], CON_NAME[c]) == 1 {
+        err_at("global '" + CON_NAME[c] + "' defined twice", CON_POS[c], CON_LINE[c])
+      }
+      g = g + 1
+    }
+    c = c + 1
+  }
+  # Every struct name is known now, so a field may name a struct declared
+  # later; only then are the fields themselves registered.
+  let s = 0
+  while s < PRE_NSTRUCT {
+    prescan_struct(s)
+    s = s + 1
+  }
+}
+
+# Globals are visible from every function, including one declared above them.
+fn predeclare_globals() {
+  let i = 0
+  while i < PRE_NGLOB {
+    declare(PRE_GNAME[i], 0 - i - 1, "")
+    i = i + 1
+  }
+}
+
+# A normalized annotation: "" (unknown), int/str/float, arr_of:T, or a struct.
+fn type_known(t: str) -> int {
+  if str_eq(t, "") == 1 {
+    return 1
+  }
+  if str_eq(t, "int") == 1 || str_eq(t, "str") == 1 || str_eq(t, "float") == 1 {
+    return 1
+  }
+  if has_arr_prefix(t) == 1 {
+    return type_known(elem_of(t))
+  }
+  if struct_find(t) >= 0 || pre_struct_find(t) >= 0 {
+    return 1
+  }
+  return 0
+}
+
+fn field_dup(sidx: int, name: str) -> int {
+  let i = S_FSTART[sidx]
+  while i < NFIELD {
+    if str_eq(F_NAME[i], name) == 1 {
+      return 1
+    }
+    i = i + 1
+  }
+  return 0
+}
+
+# "an integer", "a string", ... for a field access on a non-struct.
+fn type_article(t: str) -> str {
+  if str_eq(t, "") == 1 {
+    return "an unknown value"
+  }
+  if str_eq(t, "int") == 1 {
+    return "an integer"
+  }
+  if str_eq(t, "str") == 1 {
+    return "a string"
+  }
+  if str_eq(t, "float") == 1 {
+    return "a float"
+  }
+  if str_eq(t, "ptr") == 1 {
+    return "a pointer"
+  }
+  if str_eq(t, "arr") == 1 {
+    return "an array"
+  }
+  return t
+}
+
+fn bin_op_text(k: int) -> str {
+  if k == TK_PERCENT {
+    return "%"
+  }
+  if k == TK_AMP {
+    return "&"
+  }
+  if k == TK_PIPE {
+    return "|"
+  }
+  if k == TK_CARET {
+    return "^"
+  }
+  if k == TK_SHL {
+    return "<<"
+  }
+  if k == TK_SHR {
+    return ">>"
+  }
+  if k == TK_USHR {
+    return ">>>"
+  }
+  return "?"
+}
+
+fn assign_op_text(k: int) -> str {
+  if k == TK_PLUSEQ {
+    return "+"
+  }
+  if k == TK_MINUSEQ {
+    return "-"
+  }
+  if k == TK_STAREQ {
+    return "*"
+  }
+  if k == TK_SLASHEQ {
+    return "/"
+  }
+  if k == TK_PERCENTEQ {
+    return "%"
+  }
+  if k == TK_AMPEQ {
+    return "&"
+  }
+  if k == TK_PIPEEQ {
+    return "|"
+  }
+  if k == TK_CARETEQ {
+    return "^"
+  }
+  if k == TK_SHLEQ {
+    return "<<"
+  }
+  if k == TK_USHREQ {
+    return ">>>"
+  }
+  return ">>"
+}
+
+# ---------------------------------------------------------------- declarations
+# The prescan already registered and checked every top-level struct, because a
+# function body may use one before its declaration; skip its tokens here.
+fn parse_struct() {
+  let depth = 0
+  while cur_is(TK_EOF) == 0 {
+    if cur_is(TK_LBRACE) == 1 {
+      depth = depth + 1
+    } else if cur_is(TK_RBRACE) == 1 {
+      depth = depth - 1
+    }
+    adv()
+    if depth == 0 && TK[TI - 1] == TK_RBRACE {
+      return
+    }
+  }
 }
 
 fn fn_enter(name: str, np: int) {
@@ -3653,9 +4863,17 @@ fn fn_enter(name: str, np: int) {
 
 fn parse_fn() {
   adv()
+  if cur_is(TK_IDENT) == 0 {
+    err("expected a function name, found " + describe(TI))
+  }
   let name = TV[TI]
+  let spos = TP[TI - 1]
+  let sline = TL[TI - 1]
   if fn_find(name) >= 0 {
-    err("function '" + name + "' is defined twice")
+    err_at("function '" + name + "' defined twice", spos, sline)
+  }
+  if builtin_kind(name) != 0 {
+    err_at("function name '" + name + "' is a builtin", spos, sline)
   }
   adv()
   expect(TK_LPAREN)
@@ -3664,6 +4882,8 @@ fn parse_fn() {
   }
   let fidx = NFN
   FN_NAME[fidx] = name
+  FN_POS[fidx] = spos
+  FN_LINE[fidx] = sline
   FN_PBASE[fidx] = NPARAM
   BASE = NSYM
   el(".Lfn_" + name + ":")
@@ -3673,18 +4893,30 @@ fn parse_fn() {
   fn_enter(name, 0)
   let np = 0
   while cur_is(TK_RPAREN) == 0 {
+    if cur_is(TK_IDENT) == 0 {
+      err("expected a parameter name, found " + describe(TI))
+    }
     let pname = TV[TI]
     adv()
     let ptype = ""
     if cur_is(TK_COLON) == 1 {
       adv()
+      if cur_is(TK_IDENT) == 0 {
+        err("expected a type name, found " + describe(TI))
+      }
       ptype = TV[TI]
       adv()
       if cur_is(TK_LBRACKET) == 1 {
         adv()
-        expect(TK_RBRACKET)
+        if cur_is(TK_RBRACKET) == 0 {
+          err("expected ']' after an array type, found " + describe(TI))
+        }
+        adv()
         ptype = ptype + "[]"
       }
+    }
+    if type_known(norm_type(ptype)) == 0 {
+      err_at("unknown type '" + ptype + "'", spos, sline)
     }
     el("  mov " + rr(np) + ", " + call_reg(np))
     declare(pname, np, norm_type(ptype))
@@ -3704,13 +4936,25 @@ fn parse_fn() {
   let ret = ""
   if cur_is(TK_ARROW) == 1 {
     adv()
+    if cur_is(TK_IDENT) == 0 {
+      err("expected a return type, found " + describe(TI))
+    }
     ret = TV[TI]
     adv()
     if cur_is(TK_LBRACKET) == 1 {
       adv()
-      expect(TK_RBRACKET)
+      if cur_is(TK_RBRACKET) == 0 {
+        err("expected ']' after an array type, found " + describe(TI))
+      }
+      adv()
       ret = ret + "[]"
     }
+  }
+  if type_known(norm_type(ret)) == 0 {
+    err_at("unknown type '" + ret + "'", spos, sline)
+  }
+  if np > 6 {
+    err_at("'" + name + "' has " + np + " parameters; at most 6 are supported", spos, sline)
   }
   SLOT = np
   CUR_RET = norm_type(ret)
@@ -3731,14 +4975,27 @@ fn parse_fn() {
 
 fn parse_global() {
   adv()
+  if cur_is(TK_IDENT) == 0 {
+    err("expected a variable name, found " + describe(TI))
+  }
   let name = TV[TI]
-  if lookup(name) == 1 {
-    err("global '" + name + "' is defined twice")
+  let spos = TP[TI - 1]
+  let sline = TL[TI - 1]
+  let g = pre_global_find(name)
+  if g < 0 {
+    g = NGLOB
+  }
+  if g < 4000 && G_DEFINED[g] == 1 {
+    err_at("global '" + name + "' defined twice", spos, sline)
+  }
+  if g < 4000 {
+    G_DEFINED[g] = 1
+  }
+  if g >= NGLOB {
+    NGLOB = g + 1
   }
   adv()
   expect(TK_ASSIGN)
-  let g = NGLOB
-  NGLOB = NGLOB + 1
   el(".Lfn_g" + g + ":")
   el("  push rbp")
   el("  mov rbp, rsp")
@@ -3756,6 +5013,37 @@ fn parse_global() {
   }
 }
 
+# `const NAME = <literal>` was collected by the prescan, so this only walks
+# over the declaration (and reports a value that is not a literal).
+fn parse_const_decl() {
+  let cpos = TP[TI]
+  let cline = TL[TI]
+  adv()
+  if cur_is(TK_IDENT) == 0 {
+    err("expected a const name")
+  }
+  let cname = TV[TI]
+  adv()
+  if cur_is(TK_ASSIGN) == 0 {
+    err("expected '=' after the const name")
+  }
+  adv()
+  let sign = 1
+  if cur_is(TK_MINUS) == 1 {
+    sign = 0 - 1
+    adv()
+  }
+  if cur_is(TK_INT) == 1 {
+    adv()
+    return
+  }
+  if sign == 1 && cur_is(TK_STR) == 1 {
+    adv()
+    return
+  }
+  err_at("const '" + cname + "' needs an int or string literal", cpos, cline)
+}
+
 fn compile_program() {
   while cur_is(TK_EOF) == 0 {
     if cur_is(TK_SEMI) == 1 {
@@ -3766,16 +5054,18 @@ fn compile_program() {
       parse_fn()
     } else if cur_kw(KW_LET) == 1 {
       parse_global()
+    } else if cur_kw(KW_CONST) == 1 {
+      parse_const_decl()
     } else {
-      err("expected fn, struct or let")
+      err("expected 'fn', 'struct', a global 'let' or a 'const', found " + describe(TI))
     }
   }
-  let mi = fn_find("main")
+  let mi = fn_find(ENTRY_NAME)
   if mi < 0 {
-    err("program needs a 'fn main()'")
+    err_at("program needs a 'fn " + ENTRY_NAME + "()'", 0, 1)
   }
   if FN_NPARAM[mi] != 0 {
-    err("'main' takes no parameters")
+    err_at("'" + ENTRY_NAME + "' takes no parameters", FN_POS[mi], FN_LINE[mi])
   }
   let ci = 0
   while ci < NCALLED {
@@ -3786,18 +5076,54 @@ fn compile_program() {
   }
 }
 
+# The header is emitted before the bodies, so the usual use flags are not set
+# yet.  An identifier followed by '(' is a call (or a definition of that name),
+# which is a safe superset of the programs that need the startup capture.
+fn scan_needs_args() {
+  let i = 0
+  while i + 1 < NT {
+    if TK[i] == TK_IDENT && TK[i + 1] == TK_LPAREN {
+      if str_eq(TV[i], "argc") == 1 {
+        U_ARGC = 1
+      }
+      if str_eq(TV[i], "argv") == 1 {
+        U_ARGV = 1
+      }
+      # env() reads the argc/argv strings from the same startup capture.
+      if str_eq(TV[i], "env") == 1 {
+        U_ARGC = 1
+        U_ARGV = 1
+      }
+    }
+    i = i + 1
+  }
+}
+
 # ---------------------------------------------------------------- emission
 fn emit_header() {
   el(".intel_syntax noprefix")
   el(".text")
   el(".globl _start")
   el("_start:")
-  el("  mov rax, [rsp]")
-  el("  mov [rip + __t_argc_val], rax")
-  el("  lea rax, [rsp + 8]")
-  el("  mov [rip + __t_argv_val], rax")
+  if FREE_MODE == 1 {
+    el("  call .Lfn___init")
+    el("  call .Lfn_" + ENTRY_NAME)
+    el(".Lk_halt:")
+    el("  hlt")
+    el("  jmp .Lk_halt")
+    return
+  }
+  # Only programs that read argc() or argv() pay for the startup capture.
+  if U_ARGC == 1 {
+    el("  mov rax, [rsp]")
+    el("  mov [rip + __t_argc_val], rax")
+  }
+  if U_ARGV == 1 {
+    el("  lea rax, [rsp + 8]")
+    el("  mov [rip + __t_argv_val], rax")
+  }
   el("  call .Lfn___init")
-  el("  call .Lfn_main")
+  el("  call .Lfn_" + ENTRY_NAME)
   el("  mov edi, eax")
   el("  mov eax, 60")
   el("  syscall")
@@ -3821,18 +5147,20 @@ fn emit_data() {
   el(".data")
   el("__t_empty:")
   el("  .byte 0")
-  el("__t_oom_msg:")
-  el("  .ascii \"tlang: out of memory\"")
-  el("  .byte 10")
-  if U_ALLOC == 1 {
-    el("__t_bad_alloc_msg:")
-    el("  .ascii \"tlang: invalid allocation size\"")
+  if FREE_MODE == 0 {
+    el("__t_oom_msg:")
+    el("  .ascii \"tlang: out of memory\"")
     el("  .byte 10")
-  }
-  if U_BOUNDS == 1 {
-    el("__t_oob_msg:")
-    el("  .ascii \"tlang: index out of bounds\"")
-    el("  .byte 10")
+    if U_ALLOC == 1 {
+      el("__t_bad_alloc_msg:")
+      el("  .ascii \"tlang: invalid allocation size\"")
+      el("  .byte 10")
+    }
+    if U_BOUNDS == 1 {
+      el("__t_oob_msg:")
+      el("  .ascii \"tlang: index out of bounds\"")
+      el("  .byte 10")
+    }
   }
   let i = 1
   while i <= NSTR {
@@ -3847,30 +5175,57 @@ fn emit_data() {
     el("  .quad 0")
     g = g + 1
   }
+  let t = 0
+  while t < NTAB {
+    el("  .align 8")
+    el(TAB_LABEL[t] + ":")
+    let idx = TAB_BASE[t]
+    let n = TAB_COUNT[t]
+    let k = 0
+    while k < n {
+      el("  .quad " + TAB_TARGET[idx + k])
+      k = k + 1
+    }
+    t = t + 1
+  }
 }
 
 fn emit_bss() {
   el(".bss")
   el(".align 16")
-  el("__t_arena:")
-  el("  .zero 67108864")
-  el("__t_arena_pos:")
+  el("__t_switch_val:")
   el("  .zero 8")
-  el("__t_buf:")
-  el("  .zero 256")
-  el("__t_buf_len:")
-  el("  .zero 8")
-  el("__t_buf_pos:")
-  el("  .zero 8")
-  el("__t_argc_val:")
-  el("  .zero 8")
-  el("__t_argv_val:")
-  el("  .zero 8")
+  # A kernel image has no hosted arena or stdio buffers; the kernel runtime
+  # owns its own state.
+  if FREE_MODE == 0 {
+    el("__t_arena:")
+    el("  .zero 67108864")
+    el("__t_arena_pos:")
+    el("  .zero 8")
+    el("__t_buf:")
+    el("  .zero 256")
+    el("__t_buf_len:")
+    el("  .zero 8")
+    el("__t_buf_pos:")
+    el("  .zero 8")
+    el("__t_argc_val:")
+    el("  .zero 8")
+    el("__t_argv_val:")
+    el("  .zero 8")
+  }
   el(".section .note.GNU-stack,\"\",@progbits")
 }
 
 # ---------------------------------------------------------------- runtime
 fn need_strlen() -> int {
+  # The kernel runtime writes strings with its own loop, so printed text does
+  # not pull in strlen there.
+  if FREE_MODE == 1 {
+    if U_CONCAT == 1 || U_LEN == 1 || U_SLICE == 1 {
+      return 1
+    }
+    return 0
+  }
   if U_PRINT == 1 || U_PRINT_ERR == 1 || U_CONCAT == 1 || U_LEN == 1 {
     return 1
   }
@@ -3881,6 +5236,10 @@ fn need_strlen() -> int {
 }
 
 fn need_alloc() -> int {
+  # In a kernel the allocator comes from the kernel runtime.
+  if FREE_MODE == 1 {
+    return 0
+  }
   if U_ALLOC == 1 || U_APPEND == 1 || U_ITOA == 1 || U_FTOA == 1 || U_CONCAT == 1 || U_SLICE == 1 || U_READFILE == 1 {
     return 1
   }
@@ -3897,23 +5256,23 @@ fn emit_runtime() {
   if need_strlen() == 1 {
     rt_emit_strlen()
   }
-  if U_PRINT == 1 {
+  if U_PRINT == 1 && FREE_MODE == 0 {
     rt_emit_print()
   }
-  if U_PRINT_ERR == 1 {
+  if U_PRINT_ERR == 1 && FREE_MODE == 0 {
     rt_emit_print_err()
   }
-  if U_PRINT_INT == 1 {
+  if U_PRINT_INT == 1 && FREE_MODE == 0 {
     rt_emit_print_int()
   }
-  if U_PRINT_CHAR == 1 {
+  if U_PRINT_CHAR == 1 && FREE_MODE == 0 {
     rt_emit_print_char()
   }
   if need_alloc() == 1 {
     U_ALLOC = 1
     rt_emit_alloc()
   }
-  if U_BOUNDS == 1 {
+  if U_BOUNDS == 1 && FREE_MODE == 0 {
     rt_emit_bounds_fail()
   }
   if U_APPEND == 1 {
@@ -3940,6 +5299,28 @@ fn emit_runtime() {
   if U_STRDIFF == 1 {
     rt_emit_str_diff()
   }
+  if U_CLZ == 1 { rt_emit_clz() }
+  if U_RBIT == 1 { rt_emit_rbit() }
+  if U_BSWAP16 == 1 { rt_emit_bswap16() }
+  if U_BSWAP32 == 1 { rt_emit_bswap32() }
+  if U_BSWAP64 == 1 { rt_emit_bswap64() }
+  if U_SEXT8 == 1 { rt_emit_sext8() }
+  if U_SEXT16 == 1 { rt_emit_sext16() }
+  if U_SEXT32 == 1 { rt_emit_sext32() }
+  if U_UDIV == 1 { rt_emit_udiv() }
+  if U_UMOD == 1 { rt_emit_umod() }
+  if U_ROL8 == 1 { rt_emit_rol8() }
+  if U_ROR8 == 1 { rt_emit_ror8() }
+  if U_LD8 == 1 { rt_emit_ld8() }
+  if U_LD16 == 1 { rt_emit_ld16() }
+  if U_LD32 == 1 { rt_emit_ld32() }
+  if U_LD64 == 1 { rt_emit_ld64() }
+  if U_ST8 == 1 { rt_emit_st8() }
+  if U_ST16 == 1 { rt_emit_st16() }
+  if U_ST32 == 1 { rt_emit_st32() }
+  if U_ST64 == 1 { rt_emit_st64() }
+  if U_MEMCPY == 1 { rt_emit_memcpy() }
+  if U_MEMSET == 1 { rt_emit_memset() }
   if U_STREQ == 1 {
     rt_emit_str_eq()
   }
@@ -3980,7 +5361,7 @@ fn emit_runtime() {
   if U_FDSEND == 1 {
     rt_emit_fd_send()
   }
-  if U_EXIT == 1 {
+  if U_EXIT == 1 && FREE_MODE == 0 {
     rt_emit_exit()
   }
   if U_ARGC == 1 {
@@ -4004,6 +5385,9 @@ fn emit_runtime() {
   if U_FILEEXISTS == 1 {
     rt_emit_file_exists()
   }
+  if U_ENV == 1 {
+    rt_emit_env()
+  }
   if U_FLOAT == 1 {
     rt_emit_fconst()
     rt_emit_fadd()
@@ -4026,6 +5410,9 @@ fn emit_runtime() {
 # ---------------------------------------------------------------- modules
 let IMP_SEEN = alloc(1000, str)
 let NIMP = 0
+# The import that led to the file being loaded, for a diagnostic that names the
+# importing file rather than only the missing target.
+let IMP_FROM = ""
 # Imports are copied into one flat source buffer.  Concatenating line by line
 # allocates a fresh string per line, which is quadratic once the compiler's own
 # source has an import.
@@ -4071,6 +5458,9 @@ fn dir_of(p: str) -> str {
 
 fn join_path(base: str, rel: str) -> str {
   if len(rel) > 0 && rel[0] == 47 {
+    return rel
+  }
+  if str_eq(base, ".") == 1 {
     return rel
   }
   return base + "/" + rel
@@ -4134,11 +5524,15 @@ fn buf_add(s: str) {
 
 fn load_into(path: str) {
   if import_seen(path) == 1 {
-    print_err("tcomp: import cycle or duplicate: " + path + "\n")
+    print_err(IMP_FROM + ": error: import cycle or duplicate: " + path + "\n")
     exit(1)
   }
   if NIMP >= 1000 {
     print_err("tcomp: too many imports\n")
+    exit(1)
+  }
+  if file_exists(path) != 1 {
+    print_err(IMP_FROM + ": error: cannot read " + path + "\n")
     exit(1)
   }
   IMP_SEEN[NIMP] = path
@@ -4169,6 +5563,7 @@ fn load_into(path: str) {
       let line = slice(src, start, i - start)
       let target = import_target(line)
       if target != "" {
+        IMP_FROM = path
         load_into(join_path(dir_of(path), target))
         if SRC_LEN > 0 && SRC_BUF[SRC_LEN - 1] != 10 {
           buf_add("\n")
@@ -4187,6 +5582,7 @@ fn load_into(path: str) {
     let line = slice(src, start, len(src) - start)
     let target = import_target(line)
     if target != "" {
+      IMP_FROM = path
       load_into(join_path(dir_of(path), target))
     } else {
       buf_add(line)
@@ -4198,6 +5594,11 @@ fn load_into(path: str) {
 fn load_source(path: str) -> str {
   SRC_LEN = 0
   SRC_BUF = newbuf(SRC_CAP)
+  if file_exists(path) != 1 {
+    print_err("tcomp: cannot read " + path + "\n")
+    exit(1)
+  }
+  IMP_FROM = path
   load_into(path)
   return slice(SRC_BUF, 0, SRC_LEN)
 }
@@ -4212,11 +5613,35 @@ fn main() {
     print_version()
     return
   }
-  if argc() < 2 {
-    print_err("usage: tcomp <file.tl>\n")
+  let path = ""
+  let i = 1
+  while i < argc() {
+    let a = argv(i)
+    if a == "--freestanding" {
+      FREE_MODE = 1
+    } else if a == "--no-bounds" {
+      NO_BOUNDS = 1
+    } else if a == "--entry" {
+      i = i + 1
+      if i >= argc() {
+        print_err("tcomp: --entry needs a function name\n")
+        exit(1)
+      }
+      ENTRY_NAME = argv(i)
+    } else if len(a) > 0 && a[0] == 45 {
+      print_err("tcomp: unknown option " + a + "\n")
+      exit(1)
+    } else {
+      if path == "" {
+        path = a
+      }
+    }
+    i = i + 1
+  }
+  if path == "" {
+    print_err("usage: tcomp [--freestanding] [--no-bounds] [--entry NAME] <file.tl>\n")
     exit(1)
   }
-  let path = argv(1)
   SRC_PATH = path
   SRC = load_source(path)
   if len(SRC) == 0 {
@@ -4224,7 +5649,10 @@ fn main() {
     exit(1)
   }
   lex_all()
+  scan_needs_args()
+  prescan()
   emit_header()
+  predeclare_globals()
   compile_program()
   emit_init()
   emit_runtime()

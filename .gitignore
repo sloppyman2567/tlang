@@ -3,3 +3,9 @@ build/
 __pycache__/
 *.pyc
 /taarch64/taarch64
+/Kernel/kernel.elf
+/Kernel/kernel.bin
+/Kernel/kernel.img
+/.qemu-run/
+/test.txt
+/test_bifrost.txt

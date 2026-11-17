@@ -11,7 +11,7 @@ from .emit import (
     shl, sub, syscall, test, xor_,
 )
 from .ir import TEMP_BASE
-from .opt import peephole
+from .opt import drop_unreachable, peephole
 from .runtime import BAD_ALLOC_MSG, BSS, OOB_MSG, OOM_MSG, resolve_used
 
 
@@ -47,7 +47,7 @@ FP_BIN = {"add": "addsd", "sub": "subsd", "mul": "mulsd", "div": "divsd"}
 # binary-op name).
 RMW = {"add": "add", "sub": "sub", "and": "and", "or": "or", "xor": "xor"}
 
-SHIFT = {"shl": "shl", "shr": "sar"}      # >> is arithmetic: ints are signed
+SHIFT = {"shl": "shl", "shr": "sar", "ushr": "shr"}  # >> arithmetic, >>> logical
 
 
 def expand(fn, ins, out):
@@ -195,6 +195,20 @@ def expand(fn, ins, out):
     elif op == "jmp":
         out.append(jmp(ins[1]))
 
+    elif op == "jtable":
+        _, src, table, lo, hi, fallback = ins
+        out.append(mov(RAX, slot_mem(fn, src)))
+        if lo != 0:
+            if fits32(lo):
+                out.append(f"  sub rax, {lo}")
+            else:
+                out.append(mov(RCX, Imm(lo)))
+                out.append(sub(RAX, RCX))
+        out.append(f"  cmp rax, {hi - lo}")
+        out.append(f"  ja {fallback}")
+        out.append(f"  lea rdx, [rip + {table}]")
+        out.append("  jmp qword ptr [rdx + rax*8]")
+
     elif op in ("jz", "jnz"):
         _, src, target = ins
         out.append(f"  cmp {mem_operand(fn, src)}, 0")
@@ -294,7 +308,7 @@ def emit_function(fn):
     lines.append(define_label(f".Lret_{fn.name}"))
     lines.append(leave())
     lines.append(ret())
-    return lines
+    return drop_unreachable(lines)
 
 
 def escape_bytes(data):
@@ -318,20 +332,33 @@ def escape_bytes(data):
 
 
 def compile_module(module):
-    runtime_bodies, need_args = resolve_used(module.runtime_used)
+    free = getattr(module, "freestanding", False)
+    entry = getattr(module, "entry", "main")
+    runtime_bodies, need_args = resolve_used(module.runtime_used,
+                                             freestanding=free)
 
     lines = [".intel_syntax noprefix", ".text", ".globl _start", "_start:"]
-    if need_args:
-        lines.append("  mov rax, [rsp]")
-        lines.append("  mov [rip + __t_argc_val], rax")
-        lines.append("  lea rax, [rsp + 8]")
-        lines.append("  mov [rip + __t_argv_val], rax")
-    if module.nglobals:
-        lines.append("  call .Lfn___init")
-    lines.append("  call .Lfn_main")
-    lines.append("  mov edi, eax")
-    lines.append("  mov eax, 60")
-    lines.append("  syscall")
+    if free:
+        # A kernel enters _start directly: no argv to capture, and running off
+        # the end halts instead of exiting a process that does not exist.
+        if module.nglobals:
+            lines.append("  call .Lfn___init")
+        lines.append(f"  call .Lfn_{entry}")
+        lines.append(".Lk_halt:")
+        lines.append("  hlt")
+        lines.append("  jmp .Lk_halt")
+    else:
+        if need_args:
+            lines.append("  mov rax, [rsp]")
+            lines.append("  mov [rip + __t_argc_val], rax")
+            lines.append("  lea rax, [rsp + 8]")
+            lines.append("  mov [rip + __t_argv_val], rax")
+        if module.nglobals:
+            lines.append("  call .Lfn___init")
+        lines.append(f"  call .Lfn_{entry}")
+        lines.append("  mov edi, eax")
+        lines.append("  mov eax, 60")
+        lines.append("  syscall")
     lines.append("")
 
     for fn in module.funcs:
@@ -345,27 +372,35 @@ def compile_module(module):
     # Data nobody references would just be dead weight in the file.
     used = "\n".join(lines)
     lines.append(".data")
-    if "__t_empty" in used:
-        lines.append("__t_empty:")
-        lines.append("  .byte 0")
-    if "__t_oom_msg" in used:
-        lines.append("__t_oom_msg:")
-        lines.append('  .ascii "%s"' % OOM_MSG.replace("\n", "\\n"))
-    if "__t_bad_alloc_msg" in used:
-        lines.append("__t_bad_alloc_msg:")
-        lines.append('  .ascii "%s"' % BAD_ALLOC_MSG.replace("\n", "\\n"))
-    if "__t_oob_msg" in used:
-        lines.append("__t_oob_msg:")
-        lines.append('  .ascii "%s"' % OOB_MSG.replace("\n", "\\n"))
+    if not free:
+        # A freestanding image gets these from the kernel runtime.
+        if "__t_empty" in used:
+            lines.append("__t_empty:")
+            lines.append("  .byte 0")
+        if "__t_oom_msg" in used:
+            lines.append("__t_oom_msg:")
+            lines.append('  .ascii "%s"' % OOM_MSG.replace("\n", "\\n"))
+        if "__t_bad_alloc_msg" in used:
+            lines.append("__t_bad_alloc_msg:")
+            lines.append('  .ascii "%s"' % BAD_ALLOC_MSG.replace("\n", "\\n"))
+        if "__t_oob_msg" in used:
+            lines.append("__t_oob_msg:")
+            lines.append('  .ascii "%s"' % OOB_MSG.replace("\n", "\\n"))
     for name, data in module.strings.items():
         lines.append(f"{name}:")
         lines.append(f'  .ascii "{escape_bytes(data)}"')
         lines.append("  .byte 0")
+    for name, targets in module.tables.items():
+        lines.append("  .align 8")
+        lines.append(f"{name}:")
+        for target in targets:
+            lines.append(f"  .quad {target}")
     for index in range(module.nglobals):
         lines.append(f".Lglob{index}:")
         lines.append("  .quad 0")
     lines.append("")
-    lines.append(BSS)
+    if not free:
+        lines.append(BSS)
     lines.append('.section .note.GNU-stack,"",@progbits')
     lines.append("")
     return "\n".join(lines)

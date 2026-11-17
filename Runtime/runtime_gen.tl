@@ -26,6 +26,186 @@ fn rt_emit_str_diff() {
   el("  ret")
 }
 
+fn rt_emit_clz() {
+  el("__t_clz:")
+  el("  mov rax, rdi")
+  el("  test rax, rax")
+  el("  je .Lt_clz_zero")
+  el("  bsr rax, rax")
+  el("  xor rax, 63")
+  el("  ret")
+  el(".Lt_clz_zero:")
+  el("  mov rax, 64")
+  el("  ret")
+}
+
+fn rt_emit_rbit() {
+  el("__t_rbit:")
+  el("  mov rax, rdi")
+  el("  xor rcx, rcx")
+  el("  mov r8d, 64")
+  el(".Lt_rbit_loop:")
+  el("  shr rax, 1")
+  el("  rcl rcx, 1")
+  el("  dec r8")
+  el("  jnz .Lt_rbit_loop")
+  el("  mov rax, rcx")
+  el("  ret")
+}
+
+fn rt_emit_bswap16() {
+  el("__t_bswap16:")
+  el("  mov eax, edi")
+  el("  rol ax, 8")
+  el("  movzx rax, ax")
+  el("  ret")
+}
+
+fn rt_emit_bswap32() {
+  el("__t_bswap32:")
+  el("  mov eax, edi")
+  el("  bswap eax")
+  el("  ret")
+}
+
+fn rt_emit_bswap64() {
+  el("__t_bswap64:")
+  el("  mov rax, rdi")
+  el("  bswap rax")
+  el("  ret")
+}
+
+fn rt_emit_sext8() {
+  el("__t_sext8:")
+  el("  movsx rax, dil")
+  el("  ret")
+}
+
+fn rt_emit_sext16() {
+  el("__t_sext16:")
+  el("  movsx rax, di")
+  el("  ret")
+}
+
+fn rt_emit_sext32() {
+  el("__t_sext32:")
+  el("  movsxd rax, edi")
+  el("  ret")
+}
+
+fn rt_emit_udiv() {
+  el("__t_udiv:")
+  el("  mov rax, rdi")
+  el("  xor edx, edx")
+  el("  div rsi")
+  el("  ret")
+}
+
+fn rt_emit_umod() {
+  el("__t_umod:")
+  el("  mov rax, rdi")
+  el("  xor edx, edx")
+  el("  div rsi")
+  el("  mov rax, rdx")
+  el("  ret")
+}
+
+fn rt_emit_rol8() {
+  el("__t_rol8:")
+  el("  mov eax, edi")
+  el("  mov ecx, esi")
+  el("  rol al, cl")
+  el("  movzx rax, al")
+  el("  ret")
+}
+
+fn rt_emit_ror8() {
+  el("__t_ror8:")
+  el("  mov eax, edi")
+  el("  mov ecx, esi")
+  el("  ror al, cl")
+  el("  movzx rax, al")
+  el("  ret")
+}
+
+fn rt_emit_ld8() {
+  el("__t_ld8:")
+  el("  mov rax, rdi")
+  el("  add rax, rsi")
+  el("  movzx rax, byte ptr [rax]")
+  el("  ret")
+}
+
+fn rt_emit_ld16() {
+  el("__t_ld16:")
+  el("  mov rax, rdi")
+  el("  add rax, rsi")
+  el("  movzx rax, word ptr [rax]")
+  el("  ret")
+}
+
+fn rt_emit_ld32() {
+  el("__t_ld32:")
+  el("  mov rax, rdi")
+  el("  add rax, rsi")
+  el("  mov eax, dword ptr [rax]")
+  el("  ret")
+}
+
+fn rt_emit_ld64() {
+  el("__t_ld64:")
+  el("  mov rax, rdi")
+  el("  add rax, rsi")
+  el("  mov rax, qword ptr [rax]")
+  el("  ret")
+}
+
+fn rt_emit_st8() {
+  el("__t_st8:")
+  el("  add rdi, rsi")
+  el("  mov byte ptr [rdi], dl")
+  el("  ret")
+}
+
+fn rt_emit_st16() {
+  el("__t_st16:")
+  el("  add rdi, rsi")
+  el("  mov word ptr [rdi], dx")
+  el("  ret")
+}
+
+fn rt_emit_st32() {
+  el("__t_st32:")
+  el("  add rdi, rsi")
+  el("  mov dword ptr [rdi], edx")
+  el("  ret")
+}
+
+fn rt_emit_st64() {
+  el("__t_st64:")
+  el("  add rdi, rsi")
+  el("  mov qword ptr [rdi], rdx")
+  el("  ret")
+}
+
+fn rt_emit_memcpy() {
+  el("__t_memcpy:")
+  el("  mov rax, rdi")
+  el("  mov rcx, rdx")
+  el("  rep movsb")
+  el("  ret")
+}
+
+fn rt_emit_memset() {
+  el("__t_memset:")
+  el("  mov r8, rdi")
+  el("  mov rcx, rdx")
+  el("  mov eax, esi")
+  el("  rep stosb")
+  el("  mov rax, r8")
+  el("  ret")
+}
+
 fn rt_emit_print() {
   el("__t_print:")
   el("  push rdi")
@@ -899,6 +1079,39 @@ fn rt_emit_file_exists() {
   el("  ret")
   el(".Lt_fe_no:")
   el("  xor eax, eax")
+  el("  ret")
+}
+
+fn rt_emit_env() {
+  el("__t_env:")
+  el("  mov r8, rdi")
+  el("  mov rax, [rip + __t_argc_val]")
+  el("  mov r9, [rip + __t_argv_val]")
+  el("  lea rax, [r9 + rax*8 + 8]")
+  el(".Lt_env_loop:")
+  el("  mov r9, [rax]")
+  el("  test r9, r9")
+  el("  je .Lt_env_none")
+  el("  xor rcx, rcx")
+  el(".Lt_env_name:")
+  el("  mov dl, [r8 + rcx]")
+  el("  test dl, dl")
+  el("  je .Lt_env_end")
+  el("  cmp dl, [r9 + rcx]")
+  el("  jne .Lt_env_next")
+  el("  inc rcx")
+  el("  jmp .Lt_env_name")
+  el(".Lt_env_end:")
+  el("  cmp byte ptr [r9 + rcx], 61")
+  el("  je .Lt_env_hit")
+  el(".Lt_env_next:")
+  el("  add rax, 8")
+  el("  jmp .Lt_env_loop")
+  el(".Lt_env_hit:")
+  el("  lea rax, [r9 + rcx + 1]")
+  el("  ret")
+  el(".Lt_env_none:")
+  el("  lea rax, [rip + __t_empty]")
   el("  ret")
 }
 

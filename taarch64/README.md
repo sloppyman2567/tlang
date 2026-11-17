@@ -10,7 +10,9 @@ internals.
 
 The acceptance test is a normal static musl binary: an unmodified
 `printf`/`malloc`/`fgets`/`qsort` program runs and matches `qemu-aarch64` byte
-for byte, including exit status.
+for byte, including exit status. `python3 taarch64/bifrost_test.py` runs a
+larger optional suite of static aarch64 guests from a bifrost-emu download if
+one is present; guests that stop on an unimplemented feature are skipped.
 
 ```bash
 ./taarch64/taarch64 hello.musl          # hello, musl!
@@ -19,6 +21,13 @@ for byte, including exit status.
 It is deliberately a small emulator, not a replacement for `qemu-aarch64`: the
 goal is that a guest program either runs correctly or stops with a diagnostic
 naming the instruction or syscall it could not handle.
+
+Instruction dispatch in `src/exec.tl` switches on bits 28:25 of the instruction
+and syscall dispatch in `src/syscalls.tl` switches on `number >> 5`; both are
+dense enough for tlang's jump-table lowering, so a guest instruction no longer
+walks a chain of ~30 masked comparisons. A few decode masks deliberately ignore
+the `opc` bits, so the same exact check appears in more than one switch arm; the
+arms keep the original precedence and `bad()` still reports anything unmatched.
 
 That first musl run is the project milestone: tlang's compiler is self-hosting,
 and the interpreter produced by `Build/tcomp` runs the same guests as the

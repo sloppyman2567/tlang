@@ -10,13 +10,13 @@ from .errors import TlangError
 KEYWORDS = {
     "fn", "let", "if", "else", "while", "do", "loop", "for", "in",
     "return", "break", "continue", "true", "false", "struct", "switch",
-    "case",
+    "case", "const",
 }
 
 # Longest first: the lexer takes the first entry that matches.
 PUNCT = [
-    "<<=", ">>=", "->", "==", "!=", "<=", ">=", "&&", "||", "+=", "-=",
-    "*=", "/=", "%=", "&=", "|=", "^=", "<<", ">>", "..", "++", "--",
+    "<<=", ">>>=", ">>=", "->", "==", "!=", "<=", ">=", "&&", "||", "+=", "-=",
+    "*=", "/=", "%=", "&=", "|=", "^=", "<<", ">>>", ">>", "..", "++", "--",
     "(", ")", "{", "}", "[", "]", ",", ".", ":", "=", "+", "-", "*", "/",
     "%", "<", ">", "!", "&", "|", "^", "~", ";",
 ]
@@ -217,12 +217,20 @@ class Lexer:
     ESCAPES = {
         "n": 10, "t": 9, "r": 13, "\\": 92, '"': 34, "'": 39, "0": 0, "e": 27,
     }
+    HEX = set("0123456789abcdefABCDEF")
 
     def read_escaped(self):
         """Read one (possibly escaped) character; the quote is already consumed."""
         ch = self.advance()
         if ch == "\\":
             esc = self.advance()
+            if esc == "x":
+                digits = self.peek() + self.peek(1)
+                if len(digits) < 2 or digits[0] not in self.HEX or digits[1] not in self.HEX:
+                    self.error("\\x needs two hex digits")
+                self.advance()
+                self.advance()
+                return int(digits, 16)
             if esc not in self.ESCAPES:
                 self.error(f"unknown escape '\\{esc}'")
             return self.ESCAPES[esc]

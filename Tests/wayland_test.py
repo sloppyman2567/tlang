@@ -78,7 +78,12 @@ class FakeCompositor:
                             struct.pack("<i", fd))])
 
     def run(self):
-        self.conn, _ = self.sock.accept()
+        self.sock.settimeout(30)
+        try:
+            self.conn, _ = self.sock.accept()
+        except socket.timeout:
+            self.error = "client did not connect within 30 seconds"
+            return
         self.conn.settimeout(15)
         try:
             while True:

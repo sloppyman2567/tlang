@@ -413,32 +413,56 @@ fn do_syscall() {
   let n = X[8]
   TICKS = TICKS + 1
 
-  if n == 64 { X[0] = sys_write(); return }
-  if n == 66 { X[0] = sys_writev(); return }
-  if n == 65 { X[0] = sys_readv(); return }
-  if n == 63 { X[0] = sys_read(); return }
-  if n == 57 { X[0] = sys_close(); return }
-  if n == 29 { X[0] = sys_ioctl(); return }
-  if n == 93 || n == 94 { exit(X[0] & 255) }
-  if n == 214 { X[0] = sys_brk(); return }
-  if n == 222 { X[0] = sys_mmap(); return }
-  if n == 215 { X[0] = sys_munmap(); return }
-  if n == 226 { X[0] = sys_mprotect(); return }
-  if n == 233 { X[0] = sys_madvise(); return }
-  if n == 96 { X[0] = sys_set_tid_address(); return }
-  if n == 99 {                          # set_robust_list: one thread, nothing to track
-    X[0] = 0
-    return
-  }
-  if n == 113 { X[0] = sys_clock_gettime(); return }
-  if n == 114 { X[0] = sys_gettimeofday(); return }
-  if n == 278 { X[0] = sys_getrandom(); return }
-  if n == 172 || n == 178 { X[0] = VIRTUAL_TID; return }
-  if n == 173 { X[0] = 0; return }      # getppid: the single process is init
-  if n == 174 || n == 175 || n == 176 || n == 177 { X[0] = 0; return }
-  if n == 293 {                         # rseq: the guest falls back to locks
-    X[0] = -ENOSYS
-    return
+  # Syscall numbers are sparse, so switch on the high nibble first: the
+  # buckets are dense and each arm still tests exact numbers.  This keeps the
+  # cold path out of a 26-deep compare chain.
+  switch n >> 5 {
+    case 0 {
+      if n == 29 { X[0] = sys_ioctl(); return }
+    }
+    case 1 {
+      if n == 57 { X[0] = sys_close(); return }
+      if n == 63 { X[0] = sys_read(); return }
+    }
+    case 2 {
+      if n == 64 { X[0] = sys_write(); return }
+      if n == 65 { X[0] = sys_readv(); return }
+      if n == 66 { X[0] = sys_writev(); return }
+      if n == 93 || n == 94 { exit(X[0] & 255) }
+    }
+    case 3 {
+      if n == 96 { X[0] = sys_set_tid_address(); return }
+      if n == 99 {                       # set_robust_list: one thread, nothing to track
+        X[0] = 0
+        return
+      }
+      if n == 113 { X[0] = sys_clock_gettime(); return }
+      if n == 114 { X[0] = sys_gettimeofday(); return }
+    }
+    case 5 {
+      if n == 172 || n == 178 { X[0] = VIRTUAL_TID; return }
+      if n == 173 { X[0] = 0; return }   # getppid: the single process is init
+      if n == 174 || n == 175 || n == 176 || n == 177 { X[0] = 0; return }
+    }
+    case 6 {
+      if n == 214 { X[0] = sys_brk(); return }
+      if n == 215 { X[0] = sys_munmap(); return }
+      if n == 222 { X[0] = sys_mmap(); return }
+    }
+    case 7 {
+      if n == 226 { X[0] = sys_mprotect(); return }
+      if n == 233 { X[0] = sys_madvise(); return }
+    }
+    case 8 {
+      if n == 278 { X[0] = sys_getrandom(); return }
+    }
+    case 9 {
+      if n == 293 {                      # rseq: the guest falls back to locks
+        X[0] = -ENOSYS
+        return
+      }
+    }
+    else { }
   }
   die("unsupported syscall " + n + " at pc 0x" + hex(AT))
 }

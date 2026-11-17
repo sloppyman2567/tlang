@@ -16,6 +16,7 @@ import tempfile
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, ROOT)
 
+from Bootstrap.builtin_spec import KERNEL_ONLY  # noqa: E402
 from Bootstrap.runtime import (  # noqa: E402
     BUILTINS, RUNTIME, RUNTIME_SYMBOLS, resolve_used,
 )
@@ -31,8 +32,16 @@ def main():
             if dep != "args" and dep not in RUNTIME:
                 failures.append(f"{name}: missing dependency {dep}")
     for name, (_arity, _result, symbol) in BUILTINS.items():
+        if name in KERNEL_ONLY:
+            if not symbol.startswith("__k_"):
+                failures.append(f"builtin {name}: not a __k_ symbol")
+            continue
         if symbol not in RUNTIME_SYMBOLS:
             failures.append(f"builtin {name}: missing runtime symbol {symbol}")
+    # A freestanding image leaves kernel entries to the linker.
+    if resolve_used({"__k_poke8", "__t_print", "__t_alloc"},
+                     freestanding=True) != ([], False):
+        failures.append("freestanding resolver emitted a kernel symbol")
 
     for name in RUNTIME:
         try:

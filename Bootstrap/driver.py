@@ -29,19 +29,20 @@ class BuildError(Exception):
     pass
 
 
-def compile_source(src, filename="<input>", opt=True):
+def compile_source(src, filename="<input>", opt=True, freestanding=False,
+                   entry="main", bounds=True):
     """Return (assembly text, module)."""
     program = parse(src, filename)
-    module = lower_program(program, filename, opt)
+    module = lower_program(program, filename, opt, freestanding, entry, bounds)
     return compile_module(module), module
 
 
-def compile_path(path, opt=True):
+def compile_path(path, opt=True, freestanding=False, entry="main", bounds=True):
     """Compile a file with imports, reporting errors at their real position."""
     source = read_source(path)
     try:
         program = parse(source.text, path)
-        module = lower_program(program, path, opt)
+        module = lower_program(program, path, opt, freestanding, entry, bounds)
     except TlangError as exc:
         exc.remap(source)
         raise
@@ -64,10 +65,19 @@ def _run(argv):
     return proc
 
 
-def build(asm, out_path, asm_path=None, sstrip=True):
-    """Assemble and link `asm` into `out_path`; return the binary size."""
+def build(asm, out_path, asm_path=None, sstrip=True, freestanding=False,
+          script=None):
+    """Assemble and link `asm` into `out_path`; return the binary size.
+
+    `_start` is the ELF entry point (a linker script may override it), so there
+    is no `-e` flag here: the `--entry` option selects the function `_start`
+    calls, not the ELF entry symbol.
+    """
     as_tool = _tool("as")
     ld_tool = _tool("ld")
+    flags = [flag for flag in LINK_FLAGS if not (freestanding and flag == "-s")]
+    if script:
+        flags += ["-T", script]
     workdir = tempfile.mkdtemp(prefix="tcomp-")
     try:
         src_path = asm_path or os.path.join(workdir, "prog.s")
@@ -75,11 +85,11 @@ def build(asm, out_path, asm_path=None, sstrip=True):
         with open(src_path, "w", encoding="utf-8") as fh:
             fh.write(asm)
         _run([as_tool, *AS_FLAGS, "-o", obj_path, src_path])
-        _run([ld_tool, *LINK_FLAGS, "-o", out_path, obj_path])
+        _run([ld_tool, *flags, "-o", out_path, obj_path])
     finally:
         if asm_path is None:
             shutil.rmtree(workdir, ignore_errors=True)
-    if sstrip:
+    if sstrip and not freestanding:
         try:
             return strip_sections(out_path)
         except (ElfError, OSError) as exc:
@@ -105,13 +115,20 @@ class Source:
         return self.path, line
 
 
-def _expand_imports(path, seen, lines, locations):
-    """Append one file's lines after its imports, recording their positions."""
+def _expand_imports(path, seen, lines, locations, display=None):
+    """Append one file's lines after its imports, recording their positions.
+
+    `path` is absolute for deduplication; `display` is the path as the user
+    wrote it, so diagnostics match the self-hosted compiler's relative paths.
+    """
+    if display is None:
+        display = path
     try:
         with open(path, "r", encoding="utf-8") as fh:
             src = fh.read()
     except OSError as exc:
-        raise TlangError(f"cannot read {path}: {exc.strerror}") from None
+        raise TlangError(f"cannot read {display}: {exc.strerror}",
+                         display) from None
 
     for number, line in enumerate(src.splitlines(keepends=True), 1):
         match = IMPORT_RE.match(line.rstrip("\r\n"))
@@ -119,21 +136,27 @@ def _expand_imports(path, seen, lines, locations):
             if not line.endswith("\n"):
                 line += "\n"
             lines.append(line)
-            locations.append((path, number))
+            locations.append((display, number))
             continue
         name = match.group(1)
+        if os.path.isabs(name):
+            shown = name
+        else:
+            shown = os.path.join(os.path.dirname(display), name)
         target = name if os.path.isabs(name) else os.path.join(
             os.path.dirname(path), name)
         target = os.path.abspath(os.path.normpath(target))
         if target in seen:
-            raise TlangError(f"import cycle or duplicate: {target}")
+            raise TlangError(f"import cycle or duplicate: {shown}", display)
+        if not os.path.exists(target):
+            raise TlangError(f"cannot read {shown}", display)
         seen.add(target)
-        _expand_imports(target, seen, lines, locations)
+        _expand_imports(target, seen, lines, locations, shown)
 
 
 def read_source(path):
     target = os.path.abspath(path)
     lines = []
     locations = [("", 0)]
-    _expand_imports(target, {target}, lines, locations)
+    _expand_imports(target, {target}, lines, locations, path)
     return Source(path, "".join(lines), locations)

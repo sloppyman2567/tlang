@@ -9,7 +9,7 @@ from dataclasses import fields, is_dataclass
 
 from . import ast_nodes as A
 from .errors import TlangError
-from .builtins_gen import BUILTIN_ARGS, BUILTINS
+from .builtins_gen import BUILTIN_ARGS, BUILTIN_IDS, BUILTIN_MODES, BUILTINS
 from .ir import FuncIR, Module, TEMP_BASE
 from .kindrules_gen import compatible, is_array
 from .optir import optimize_module
@@ -35,7 +35,8 @@ def type_kind(name, structs):
 ARITH = {"+": "add", "-": "sub", "*": "mul", "/": "div", "%": "mod"}
 CMP = {"==": "eq", "!=": "ne", "<": "lt", "<=": "le", ">": "gt", ">=": "ge"}
 # Shifts and bitwise operators are integers-only: they have no string meaning.
-BITS = {"&": "and", "|": "or", "^": "xor", "<<": "shl", ">>": "shr"}
+BITS = {"&": "and", "|": "or", "^": "xor", "<<": "shl", ">>": "shr",
+        ">>>": "ushr"}
 BIN_OPS = dict(ARITH, **BITS)
 UNARY = {"-": "neg", "!": "not", "~": "bnot"}
 
@@ -63,12 +64,16 @@ class Val:
 
 
 class Context:
-    def __init__(self, structs, funcs, ret_kinds, filename, field_kinds=None):
+    def __init__(self, structs, funcs, ret_kinds, filename, field_kinds=None,
+                 freestanding=False, bounds=True):
         self.structs = structs
         self.funcs = funcs
         self.ret_kinds = ret_kinds
         self.filename = filename
         self.field_kinds = field_kinds or {}
+        self.freestanding = freestanding
+        self.bounds = bounds
+        self.tables = {}
         self.offsets = {name: {f: i * 8 for i, f in enumerate(fs)}
                         for name, fs in structs.items()}
 
@@ -234,11 +239,14 @@ def infer_ret_kind(fn, ctx, base_scope=None):
 
 
 class Lowerer:
-    def __init__(self, ctx, strings, runtime_used, base_scope=None):
+    def __init__(self, ctx, strings, runtime_used, base_scope=None, consts=None):
         self.ctx = ctx
         self.strings = strings
         self.runtime_used = runtime_used
         self.base_scope = base_scope or {}
+        # Names that stand for a literal: each use lowers the literal itself, so
+        # a const costs no global and no startup store.
+        self.consts = consts or {}
         self.fname = ""
         self.ins = []
         self.nperm = 0
@@ -287,11 +295,17 @@ class Lowerer:
         return is_pointer_kind(kind, self.ctx.structs)
 
     def lookup(self, name, node):
+        found = self.find(name)
+        if found is not None:
+            return found
+        self.error(f"unknown variable '{name}'", node)
+
+    def find(self, name):
+        """The variable named `name`, or None.  Locals shadow consts."""
         for scope in reversed(self.scopes):
             if name in scope:
                 entry = scope[name]
                 return Val(entry[0], entry[1])
-        self.error(f"unknown variable '{name}'", node)
 
     def new_perm(self):
         slot = self.nperm
@@ -527,24 +541,58 @@ class Lowerer:
                 f"{kind_name(vkind)} case values", node)
 
         end = self.label()
+        default_label = self.label() if node.default is not None else None
+        fallback = default_label or end
+
+        # A dense set of integer cases becomes a jump table.  The cases are
+        # literals, so the whole table is known at compile time; sparse and
+        # string switches keep the compare chain below.
+        table = None
+        if vkind == INT and len(node.cases) >= 4:
+            mapping = {}
+            for case in node.cases:
+                for value in case.values:
+                    if value.value not in mapping:
+                        mapping[value.value] = None   # body label filled below
+            if len(mapping) >= 4:
+                lo, hi = min(mapping), max(mapping)
+                span = hi - lo
+                if 0 <= span <= min(4096, 4 * len(mapping)):
+                    table = (lo, hi, mapping)
+
         arms = []
         for case in node.cases:
             body_label = self.label()
-            for value in case.values:
-                val = self.expr(value)
-                cond = self.temp()
-                if vkind == STR:
-                    self.use("__t_str_eq")
-                    self.emit("bcall", cond, "__t_str_eq", (sel.slot, val.slot))
-                    self.emit("jnz", cond, body_label)
-                else:
-                    self.emit("cmp", "eq", cond, sel.slot, val.slot)
-                    self.emit("jnz", cond, body_label)
-            arms.append((case, body_label))
+            if table is not None:
+                for value in case.values:
+                    if mapping[value.value] is None:
+                        mapping[value.value] = body_label
+                vals = []
+            else:
+                vals = [self.expr(value) for value in case.values]
+            arms.append((case, body_label, vals))
 
-        default_label = self.label() if node.default is not None else None
-        self.emit("jmp", default_label or end)
-        for case, body_label in arms:
+        if table is not None:
+            lo, hi, mapping = table
+            table_label = ".Ljtab" + str(len(self.ctx.tables))
+            targets = [mapping.get(v, fallback) for v in range(lo, hi + 1)]
+            self.ctx.tables[table_label] = targets
+            self.emit("jtable", sel.slot, table_label, lo, hi, fallback)
+        else:
+            for case, body_label, vals in arms:
+                for val in vals:
+                    cond = self.temp()
+                    if vkind == STR:
+                        self.use("__t_str_eq")
+                        self.emit("bcall", cond, "__t_str_eq",
+                                  (sel.slot, val.slot))
+                        self.emit("jnz", cond, body_label)
+                    else:
+                        self.emit("cmp", "eq", cond, sel.slot, val.slot)
+                        self.emit("jnz", cond, body_label)
+            self.emit("jmp", fallback)
+
+        for case, body_label, _vals in arms:
             self.emit("lab", body_label)
             self.loops.append((end, ""))
             self.stmt(case.body)
@@ -559,6 +607,14 @@ class Lowerer:
 
     def assign(self, node):
         target = node.target
+        # A chain like a[i].f still starts at a name, so a const cannot be
+        # written through an index or a field any more than by plain name.
+        root = target
+        while isinstance(root, (A.Index, A.Field)):
+            root = root.base
+        if (isinstance(root, A.Name) and self.find(root.name) is None
+                and root.name in self.consts):
+            self.error(f"cannot assign to const '{root.name}'", root)
         if isinstance(target, A.Name):
             slot = self.lookup(target.name, target)
             v = self.expr(node.expr)
@@ -608,6 +664,8 @@ class Lowerer:
         branches. Interior pointers have no header and stay unchecked; they
         are represented by PTR, while whole arrays are ARR/arr_of.
         """
+        if not self.ctx.bounds:
+            return
         if not (base.kind == ARR or base.kind.startswith("arr_of:")):
             return
         self.use("__t_bounds_fail")
@@ -633,6 +691,8 @@ class Lowerer:
         Writing at `strlen(s)` is how a NUL-terminated buffer grows, so the
         upper bound must stay open anyway.
         """
+        if not self.ctx.bounds:
+            return
         self.use("__t_bounds_fail")
         good = self.label()
         self.emit("jcck", "ge", idx.slot, 0, good)
@@ -660,6 +720,11 @@ class Lowerer:
             self.emit("lea", t, self.intern(node.value))
             return Val(t, STR)
         if isinstance(node, A.Name):
+            found = self.find(node.name)
+            if found is not None:
+                return found
+            if node.name in self.consts:
+                return self.expr(self.consts[node.name])
             return self.lookup(node.name, node)
         if isinstance(node, A.Bin):
             return self.binary(node)
@@ -857,14 +922,15 @@ class Lowerer:
 
         # alloc(n, Struct) allocates a typed array: indexing it yields Struct.
         if (name == "alloc" and len(node.args) == 2
-                and isinstance(node.args[1], A.Name)
-                and (node.args[1].name in self.ctx.structs
-                     or node.args[1].name in (INT, STR, FLOAT))):
+                and isinstance(node.args[1], A.Name)):
+            elem = node.args[1].name
+            if elem not in self.ctx.structs and elem not in (INT, STR, FLOAT):
+                self.error(f"unknown type '{elem}'", node.args[1])
             count = self.expr(node.args[0])
             t = self.temp()
             self.use("__t_alloc")
             self.emit("bcall", t, "__t_alloc", (count.slot,))
-            return Val(t, "arr_of:" + node.args[1].name)
+            return Val(t, "arr_of:" + elem)
 
         args = [self.expr(a) for a in node.args]
 
@@ -878,7 +944,9 @@ class Lowerer:
                 self.use("__t_itof")
                 self.emit("bcall", t, "__t_itof", (args[0].slot,))
                 return Val(t, FLOAT)
-            self.error("float() needs an integer or a float", node)
+            self.error(
+                f"float() argument 1 should be int or float, "
+                f"got {kind_name(args[0].kind)}", node)
 
         if name == "int" and len(args) == 1 and args[0].kind == FLOAT:
             t = self.temp()
@@ -968,6 +1036,15 @@ class Lowerer:
             return Val(t, self.ctx.ret_kinds.get(name, UNKNOWN))
 
         if name in BUILTINS:
+            mode = BUILTIN_MODES.get(name, "any")
+            if mode == "kernel" and not self.ctx.freestanding:
+                self.error(
+                    f"{name}() is a kernel builtin; build with "
+                    f"--freestanding", node)
+            if mode == "hosted" and self.ctx.freestanding:
+                self.error(
+                    f"{name}() needs a hosted Linux program, so it is not "
+                    f"available with --freestanding", node)
             arity, kind, symbol = BUILTINS[name]
             if len(args) != arity:
                 self.error(
@@ -1041,13 +1118,14 @@ class Lowerer:
                       self.ins, ret_kind)
 
 
-def lower_program(program, filename="<input>", opt=True):
+def lower_program(program, filename="<input>", opt=True, freestanding=False,
+                  entry="main", bounds=True):
     structs = {}
     for decl in program.structs:
         if decl.name in structs:
             raise TlangError(f"struct '{decl.name}' defined twice", filename,
                              decl.line, decl.col)
-        if decl.name in BUILTINS:
+        if decl.name in BUILTIN_IDS:
             raise TlangError(
                 f"struct name '{decl.name}' is a builtin", filename,
                 decl.line, decl.col)
@@ -1074,22 +1152,35 @@ def lower_program(program, filename="<input>", opt=True):
         if fn.name in funcs:
             raise TlangError(f"function '{fn.name}' defined twice", filename,
                              fn.line, fn.col)
-        if fn.name in BUILTINS:
+        if fn.name in BUILTIN_IDS:
             raise TlangError(
                 f"function name '{fn.name}' is a builtin", filename,
                 fn.line, fn.col)
         funcs[fn.name] = fn
 
-    if "main" not in funcs:
-        raise TlangError("program needs a 'fn main()'", filename, 1, 1)
-    if funcs["main"].params:
-        raise TlangError("'main' takes no parameters", filename,
-                         funcs["main"].line, funcs["main"].col)
+    if entry not in funcs:
+        raise TlangError(f"program needs a 'fn {entry}()'", filename, 1, 1)
+    if funcs[entry].params:
+        raise TlangError(f"'{entry}' takes no parameters", filename,
+                         funcs[entry].line, funcs[entry].col)
 
-    ctx = Context(structs, funcs, {}, filename, field_kinds)
+    ctx = Context(structs, funcs, {}, filename, field_kinds, freestanding,
+                  bounds)
+    consts = {}
+    global_names = {node.name for node in program.globals}
+    for node in program.consts:
+        if node.name in consts:
+            raise TlangError(f"const '{node.name}' defined twice", filename,
+                             node.line, node.col)
+        if node.name in global_names:
+            raise TlangError(f"global '{node.name}' defined twice", filename,
+                             node.line, node.col)
+        consts[node.name] = node.expr
     # Globals are visible from every function, so return inference can see
-    # them. Later globals are not in scope yet, matching lowering.
-    global_scope = {}
+    # them. Later globals are not in scope yet, matching lowering.  Consts are
+    # literals, so they are all in scope from the start.
+    global_scope = {name: infer_expr_kind(expr, {}, ctx)
+                    for name, expr in consts.items()}
     for node in program.globals:
         global_scope[node.name] = infer_expr_kind(
             node.expr, dict(global_scope), ctx)
@@ -1102,11 +1193,11 @@ def lower_program(program, filename="<input>", opt=True):
                                   if fn.ret_type
                                   else infer_ret_kind(fn, ctx, global_scope))
 
-    # Only emit functions reachable from main or from a global initializer.
-    # Globals are lowered into __init, so a helper they call is a root even
-    # when nothing in main calls it.
+    # Only emit functions reachable from the entry point or from a global
+    # initializer.  Globals are lowered into __init, so a helper they call is
+    # a root even when nothing in the entry function calls it.
     reachable = set()
-    worklist = ["main"]
+    worklist = [entry]
     for node in program.globals:
         for sub in walk(node.expr):
             if isinstance(sub, A.Call) and sub.name in funcs:
@@ -1128,7 +1219,7 @@ def lower_program(program, filename="<input>", opt=True):
     # They are encoded as negative slots: global i is slot -(i + 1).
     globals_scope = {}
     if program.globals:
-        init = Lowerer(ctx, strings, runtime_used)
+        init = Lowerer(ctx, strings, runtime_used, consts=consts)
         init.fname = "__init"
         for index, node in enumerate(program.globals):
             if node.name in globals_scope:
@@ -1136,9 +1227,9 @@ def lower_program(program, filename="<input>", opt=True):
                                  filename, node.line, node.col)
             value = init.expr(node.expr)
             init.emit("mov", -1 - index, value.slot)
-            entry = [-1 - index, value.kind]
-            globals_scope[node.name] = entry
-            init.scopes[0][node.name] = entry
+            slot = [-1 - index, value.kind]
+            globals_scope[node.name] = slot
+            init.scopes[0][node.name] = slot
         irs.append(FuncIR("__init", [], init.nperm, init.max_temp, init.ins,
                           INT))
 
@@ -1148,11 +1239,12 @@ def lower_program(program, filename="<input>", opt=True):
             # including dead ones. Lower the function into a throwaway context
             # so both compilers accept and reject the same programs, without
             # pulling its strings or runtime helpers into the binary.
-            checker = Lowerer(ctx, {}, set(), globals_scope)
+            checker = Lowerer(ctx, {}, set(), globals_scope, consts)
             checker.lower_func(fn, ctx.ret_kinds.get(fn.name, UNKNOWN))
             continue
-        lowerer = Lowerer(ctx, strings, runtime_used, globals_scope)
+        lowerer = Lowerer(ctx, strings, runtime_used, globals_scope, consts)
         irs.append(lowerer.lower_func(fn, ctx.ret_kinds.get(fn.name, UNKNOWN)))
 
-    module = Module(irs, strings, runtime_used, len(program.globals))
+    module = Module(irs, strings, runtime_used, len(program.globals),
+                    freestanding, entry, ctx.tables)
     return optimize_module(module) if opt else module

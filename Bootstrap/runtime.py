@@ -39,6 +39,190 @@ RUNTIME = {
   ret""",
         [],
     ),
+    # Bit primitives used by emulators.  Each is a leaf with no dependencies.
+    "clz": (
+        """__t_clz:
+  mov rax, rdi
+  test rax, rax
+  je .Lt_clz_zero
+  bsr rax, rax
+  xor rax, 63
+  ret
+.Lt_clz_zero:
+  mov rax, 64
+  ret""",
+        [],
+    ),
+    "rbit": (
+        """__t_rbit:
+  mov rax, rdi
+  xor rcx, rcx
+  mov r8d, 64
+.Lt_rbit_loop:
+  shr rax, 1
+  rcl rcx, 1
+  dec r8
+  jnz .Lt_rbit_loop
+  mov rax, rcx
+  ret""",
+        [],
+    ),
+    "bswap16": (
+        """__t_bswap16:
+  mov eax, edi
+  rol ax, 8
+  movzx rax, ax
+  ret""",
+        [],
+    ),
+    "bswap32": (
+        """__t_bswap32:
+  mov eax, edi
+  bswap eax
+  ret""",
+        [],
+    ),
+    "bswap64": (
+        """__t_bswap64:
+  mov rax, rdi
+  bswap rax
+  ret""",
+        [],
+    ),
+    "sext8": (
+        """__t_sext8:
+  movsx rax, dil
+  ret""",
+        [],
+    ),
+    "sext16": (
+        """__t_sext16:
+  movsx rax, di
+  ret""",
+        [],
+    ),
+    "sext32": (
+        """__t_sext32:
+  movsxd rax, edi
+  ret""",
+        [],
+    ),
+    "udiv": (
+        """__t_udiv:
+  mov rax, rdi
+  xor edx, edx
+  div rsi
+  ret""",
+        [],
+    ),
+    "umod": (
+        """__t_umod:
+  mov rax, rdi
+  xor edx, edx
+  div rsi
+  mov rax, rdx
+  ret""",
+        [],
+    ),
+    "rol8": (
+        """__t_rol8:
+  mov eax, edi
+  mov ecx, esi
+  rol al, cl
+  movzx rax, al
+  ret""",
+        [],
+    ),
+    "ror8": (
+        """__t_ror8:
+  mov eax, edi
+  mov ecx, esi
+  ror al, cl
+  movzx rax, al
+  ret""",
+        [],
+    ),
+    # Unchecked guest-memory primitives.  A newbuf string is just bytes, so
+    # these need no header and no bounds branch; callers that want a trap use
+    # ordinary indexing or --bounds (the default).
+    "ld8": (
+        """__t_ld8:
+  mov rax, rdi
+  add rax, rsi
+  movzx rax, byte ptr [rax]
+  ret""",
+        [],
+    ),
+    "ld16": (
+        """__t_ld16:
+  mov rax, rdi
+  add rax, rsi
+  movzx rax, word ptr [rax]
+  ret""",
+        [],
+    ),
+    "ld32": (
+        """__t_ld32:
+  mov rax, rdi
+  add rax, rsi
+  mov eax, dword ptr [rax]
+  ret""",
+        [],
+    ),
+    "ld64": (
+        """__t_ld64:
+  mov rax, rdi
+  add rax, rsi
+  mov rax, qword ptr [rax]
+  ret""",
+        [],
+    ),
+    "st8": (
+        """__t_st8:
+  add rdi, rsi
+  mov byte ptr [rdi], dl
+  ret""",
+        [],
+    ),
+    "st16": (
+        """__t_st16:
+  add rdi, rsi
+  mov word ptr [rdi], dx
+  ret""",
+        [],
+    ),
+    "st32": (
+        """__t_st32:
+  add rdi, rsi
+  mov dword ptr [rdi], edx
+  ret""",
+        [],
+    ),
+    "st64": (
+        """__t_st64:
+  add rdi, rsi
+  mov qword ptr [rdi], rdx
+  ret""",
+        [],
+    ),
+    "memcpy": (
+        """__t_memcpy:
+  mov rax, rdi
+  mov rcx, rdx
+  rep movsb
+  ret""",
+        [],
+    ),
+    "memset": (
+        """__t_memset:
+  mov r8, rdi
+  mov rcx, rdx
+  mov eax, esi
+  rep stosb
+  mov rax, r8
+  ret""",
+        [],
+    ),
     "print": (
         """__t_print:
   push rdi
@@ -941,6 +1125,42 @@ RUNTIME = {
   ret""",
         [],
     ),
+    # The kernel lays out argc, argv and envp on the initial stack; argv and
+    # argc are captured by _start, so envp is argv + 8*argc + 8.  Each entry
+    # is NAME=value, and an unset name yields the empty string.
+    "env": (
+        """__t_env:
+  mov r8, rdi
+  mov rax, [rip + __t_argc_val]
+  mov r9, [rip + __t_argv_val]
+  lea rax, [r9 + rax*8 + 8]
+.Lt_env_loop:
+  mov r9, [rax]
+  test r9, r9
+  je .Lt_env_none
+  xor rcx, rcx
+.Lt_env_name:
+  mov dl, [r8 + rcx]
+  test dl, dl
+  je .Lt_env_end
+  cmp dl, [r9 + rcx]
+  jne .Lt_env_next
+  inc rcx
+  jmp .Lt_env_name
+.Lt_env_end:
+  cmp byte ptr [r9 + rcx], 61
+  je .Lt_env_hit
+.Lt_env_next:
+  add rax, 8
+  jmp .Lt_env_loop
+.Lt_env_hit:
+  lea rax, [r9 + rcx + 1]
+  ret
+.Lt_env_none:
+  lea rax, [rip + __t_empty]
+  ret""",
+        ["args"],
+    ),
     # Minimal binary I/O for protocol clients: a Unix socket connect, byte
     # reads/writes that may be partial, poll(2) for event waits, and a zeroed
     # byte buffer that is a string (so it can hold NULs and be indexed).
@@ -1472,6 +1692,14 @@ RUNTIME_SYMBOLS = {
     for name, (body, deps) in RUNTIME.items()
 }
 
+# Entries a freestanding build takes from the kernel runtime
+# (Kernel/kruntime.s) instead of emitting them: there is no process to write
+# to or exit, and the kernel owns the allocator.
+KERNEL_PROVIDED = {
+    "__t_print", "__t_print_err", "__t_print_char", "__t_print_int",
+    "__t_alloc", "__t_exit", "__t_bounds_fail",
+}
+
 # Entries that need the argv capture in _start rather than a function body.
 PSEUDO_DEPS = {"args"}
 
@@ -1479,8 +1707,12 @@ CONCAT_SYMBOL = "__t_concat"
 STRLEN_SYMBOL = "__t_strlen"
 
 
-def resolve_used(used_symbols):
-    """Expand a set of runtime symbol names with their transitive dependencies."""
+def resolve_used(used_symbols, freestanding=False):
+    """Expand a set of runtime symbol names with their transitive dependencies.
+
+    In freestanding mode the kernel-provided entries and the machine builtin
+    stubs (__k_*) are left for the linker to resolve.
+    """
     out = []
     seen = set()
     need_args = False
@@ -1490,6 +1722,9 @@ def resolve_used(used_symbols):
         if name in seen:
             return
         seen.add(name)
+        if freestanding and (name in KERNEL_PROVIDED
+                             or name.startswith("__k_")):
+            return
         if name in PSEUDO_DEPS:
             need_args = True
             return

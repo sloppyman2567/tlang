@@ -4,4 +4,4 @@ This exists only to build the self-hosted compiler (tcomp.tl).  Once the
 fixed point holds it can be deleted.
 """
 
-__version__ = "1.1.0"
+__version__ = "1.2.0"

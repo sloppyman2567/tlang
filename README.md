@@ -1,6 +1,6 @@
 # tlang
 
-Version 1.1.0 — see [CHANGELOG.md](CHANGELOG.md) for release notes.
+Version 1.2.0 — see [CHANGELOG.md](CHANGELOG.md) for release notes.
 
 A small, high-level language that compiles to **very small native Linux binaries**.
 Its compiler, **tcomp**, is written in tlang itself. The same language is used
@@ -28,15 +28,15 @@ Measured on x86-64 Linux with binutils 2.47:
 | Program | Size | `--no-opt` |
 |---|---|---|
 | `fn main() {}` | **256 B** | 256 B |
-| hello world (`print("hello, tlang\n")`) | **329 B** | 333 B |
-| fib (recursion, 10 calls) | 602 B | 669 B |
-| fizzbuzz (20 lines of output, branches) | 749 B | 790 B |
-| primes, first 20 (functions, loops, calls) | 692 B | 826 B |
-| words (stdin, `read_file`, `argv`) | 1,789 B | 1,911 B |
-| **tbox** (four tools: `wc`, `head`, `tail`, `grep`) | **8,741 B** | — |
-| **tjson** (JSON validate, format, query) | 16,059 B | — |
-| **tbf** (Brainfuck interpreter) | 5,198 B | — |
-| tcomp, the whole compiler | 113,623 B | — |
+| hello world (`print("hello, tlang\n")`) | **321 B** | 325 B |
+| fib (recursion, 10 calls) | 549 B | 624 B |
+| fizzbuzz (20 lines of output, branches) | 665 B | 734 B |
+| primes, first 20 (functions, loops, calls) | 637 B | 753 B |
+| words (stdin, `read_file`, `argv`) | 1,633 B | 1,778 B |
+| **tbox** (four tools: `wc`, `head`, `tail`, `grep`) | **7,106 B** | — |
+| **tjson** (JSON validate, format, query) | 13,510 B | — |
+| **tbf** (Brainfuck interpreter) | 4,605 B | — |
+| tcomp, the whole compiler | 158,970 B | — |
 | *for comparison:* hello world in C, `gcc -Os -s` | 14,472 B | — |
 | *for comparison:* `grep` + `wc` + `head` + `tail` from coreutils | 437 KB | — |
 
@@ -44,7 +44,7 @@ Sizes include the default bounds checks. Timings are wall-clock
 `tcomp build tcomp.tl --asm` on a development machine (code generation only,
 without assembling or linking); the timing figures below predate those checks.
 
-Hello world is **44× smaller than the C equivalent**, and an empty `main` is
+Hello world is **45× smaller than the C equivalent**, and an empty `main` is
 **256 B** — 232 of which are the ELF header and three program headers. On a
 file this small the optimizer only moves a few bytes; its 6–16% shows up in
 loop bodies, and in run time.
@@ -63,13 +63,15 @@ syscalls and `ld` writes a single read/execute segment.
 ## Quick start
 
 ```bash
-./tcomp --version                       # tcomp 1.1.0
+./tcomp --version                       # tcomp 1.2.0
 ./tcomp run Examples/hello.tl           # compile and run
 ./tcomp build Examples/hello.tl         # -> ./hello
 ./tcomp build Examples/hello.tl --asm   # show the generated assembly
 ./tcomp build Examples/hello.tl --ir    # show the optimized three-address IR
 ./tcomp build Examples/hello.tl --no-opt      # skip IR optimization
+./tcomp build game.tl --no-bounds             # omit index checks (emulator loops)
 ./tcomp build Examples/hello.tl --keep-sections   # keep ELF section headers
+./Kernel/build.sh                       # freestanding kernel: kernel.elf, .bin, .img
 ```
 
 Requirements: Python 3.9+ (for the bootstrap compiler) and binutils (`as`, `ld`).
@@ -85,12 +87,12 @@ Tools/selfhost.sh --verify     # builds Build/tcomp and proves the fixed point
 
 ```
 stage 1: tcomp.tl -> Build/tcomp0 (via stage 0)
-  Build/tcomp0: 158648 bytes
+  Build/tcomp0: 173665 bytes
 stage 2: tcomp.tl -> Build/tcomp (via stage 1)
-  Build/tcomp: 113623 bytes
+  Build/tcomp: 158970 bytes
 stage 3: tcomp.tl -> Build/tcomp2 (via stage 2)
 stage 4: tcomp.tl -> Build/tcomp3 (via stage 3)
-fixed point: stage 2 and stage 3 are identical (113623 bytes)
+fixed point: stage 2 and stage 3 are identical (158970 bytes)
 ```
 
 `Build/tcomp` emits assembly on stdout:
@@ -166,7 +168,13 @@ fn main() {
 }
 ```
 
-* `let NAME = expr` declares; `NAME = expr` assigns.
+* `let NAME = expr` declares; `NAME = expr` assigns. A target can be any
+  chain of indices and fields (`a[i].f = v`, `o.a.v = v`), and the value is
+  stored where the same chain would read.
+* `const NAME = <int or string literal>` names a literal. It has no storage and
+  no startup store — every use is the literal itself, so a mask or a token kind
+  folds into the instruction that reads it. A function may use a const declared
+  further down the file, and assigning to one is a compile error.
 * `for i in A..B { }` walks `A` up to (not including) `B`. The bound is
   evaluated **once**, before the first iteration, and `continue` still advances
   the counter. A range loop is the common case, so it has its own syntax rather
@@ -184,8 +192,10 @@ fn main() {
 * `switch VALUE { case 1 { } case 2, 3 { } else { } }` runs the first matching
   arm; there is no fallthrough. `break` leaves the switch, while `continue`
   leaves to the enclosing loop. Case values are number or string literals, and
-  a switch needs an arm to be typed as an integer or a string switch.
-* `NAME += expr`, `-=` `*=` `/=` `%=` `&=` `|=` `^=` `<<=` `>>=` are sugar for
+  a switch needs an arm to be typed as an integer or a string switch. A dense
+  integer switch compiles to one range check and a jump table; sparse and
+  string switches use a compare chain.
+* `NAME += expr`, `-=` `*=` `/=` `%=` `&=` `|=` `^=` `<<=` `>>>=` `>>=` are sugar for
   `NAME = NAME op expr`. The target is evaluated twice, so it must be a plain
   variable — `a[i] += 1` is rejected rather than silently evaluating the index
   twice.
@@ -232,7 +242,7 @@ because it is the language's null; it is *not* accepted as a string.
 | 5 | `&` |
 | 6 | `==` `!=` |
 | 7 | `<` `<=` `>` `>=` |
-| 8 | `<<` `>>` |
+| 8 | `<<` `>>` `>>>` |
 | 9 | `+` `-` |
 | 10 | `*` `/` `%` |
 
@@ -249,8 +259,11 @@ Pointer arithmetic works in 8-byte slots for `ptr`, array and struct values:
 byte movement uses `str_offset(s, n)` and `str_diff(a, b)`.
 
 Bitwise operators see the 64-bit integer the hardware sees: `>>` is arithmetic
-(a negative value stays negative), and a shift count is taken modulo 64.
-`~` is bitwise complement; `!` is still logical not.
+(a negative value stays negative), `>>>` shifts in zeros, and a shift count is
+taken modulo 64. `>>>=` is the compound form. `~` is bitwise complement; `!` is
+still logical not. `>>>` is what emulator code wants when it extracts an
+unsigned field from a value that may have its top bit set:
+`word >>> 24` needs no `& 0xFF` afterwards.
 
 ```tlang
 let flags = 0
@@ -263,8 +276,9 @@ print_int(0x0F & 0b1010)       # 10
 
 ### Strings
 
-String literals support `\n`, `\t`, `\r`, `\\`, `\"`, `\'`, `\0`, and `\e`.
-`+` concatenates; an int on either side is converted first:
+String literals support `\n`, `\t`, `\r`, `\\`, `\"`, `\'`, `\0`, `\e`, and
+`\xNN` — exactly two hex digits, so `\x41` is `A` and `\x00` ends the string
+like `\0` does. `+` concatenates; an int on either side is converted first:
 
 ```tlang
 print("n = " + 42 + "\n")     # n = 42
@@ -276,6 +290,10 @@ print("hello"[0])              # error: print() needs a string
 `"hello"[i]` yields the byte as an int; assigning to it writes a byte. Only
 strings you allocated (`alloc`, `slice`, `input`, `read_file`) should be mutated.
 
+A string literal is the compact way to carry a byte table: `tchip8`'s 80-byte
+font is one `\xNN` literal, which costs 80 bytes of data where an int array
+literal costs a store per element.
+
 Integer literals can be written in hex (`0xFF`) or binary (`0b1010_1111`), with
 `_` as a digit separator.
 
@@ -286,7 +304,9 @@ linear scan. The hoist only happens when the loop cannot change the string.
 
 ### Arrays
 
-Arrays are allocated as 8-byte slots, indexed without bounds checks:
+Arrays are allocated as 8-byte slots. Indexing is bounds-checked by default: an
+index outside the array is reported and the process exits, rather than reading
+or writing past the allocation.
 
 ```tlang
 fn main() {
@@ -406,7 +426,9 @@ fn main() {
 }
 ```
 
-Globals are initialized in declaration order before `main` runs.
+Globals are initialized in declaration order before `main` runs. A function
+may read a global declared later in the file; the compilers collect top-level
+names before checking bodies, so declaration order does not restrict use.
 
 ### Modules
 
@@ -467,7 +489,139 @@ in the module headers.
 | `fd_pwrite(fd, off, buf, n)` | write `n` bytes at `off`, rewriting in place |
 | `fd_send(fd, buf, n, pass)` | send one message with the descriptor `pass` attached (`SCM_RIGHTS`) |
 | `argv(i)`, `argc()` | command-line access (index 0 is the program path) |
+| `env(name)` | value of an environment variable; `""` when it is unset |
+| `clz(v)`, `rbit(v)` | leading zeros (`64` for `0`) and reversed 64 bits |
+| `bswap16(v)`, `bswap32(v)`, `bswap64(v)` | reversed bytes, zero-extended to 64 bits |
+| `sext8(v)`, `sext16(v)`, `sext32(v)` | sign-extend the low 8/16/32 bits |
+| `udiv(a, b)`, `umod(a, b)` | unsigned 64-bit division and remainder |
+| `rol8(v, n)`, `ror8(v, n)` | rotate the low byte; the count is taken modulo 8 |
+| `ld8/16/32/64(buf, off)` | unchecked little-endian load from a byte buffer |
+| `st8/16/32/64(buf, off, v)` | unchecked little-endian store into a byte buffer |
+| `memcpy(dst, src, n)`, `memset(dst, v, n)` | bulk byte copy and fill |
 | `exit(n)` | terminate with status `n` |
+
+These bit primitives are aimed at emulator code, which otherwise rewrites the
+same masking, sign-extension and byte-swapping loops in every program. They
+compile to short leaf routines in the conditional runtime, so a program that
+uses none of them pays nothing.
+
+The `ld*`/`st*` family addresses a `newbuf` buffer by byte offset with no bounds
+check and no endian shifting, and `memcpy`/`memset` are the usual `rep movsb` /
+`rep stosb` loops. Together they are the primitives an emulator's guest-memory
+helpers are built from. `tcomp build --no-bounds` drops the checks from ordinary
+array and string indexing as well; both compilers accept it, and it is meant
+for measured hot loops, not general programs. The default remains checked.
+
+### Kernel builtins
+
+`tcomp build --freestanding` compiles a program with no Linux under it: `_start`
+calls the entry function and halts instead of exiting, the 64 MB arena and the
+stdio buffers are left out, and `print`, `print_char`, `print_int`, `alloc`,
+`exit` and the out-of-memory/bounds diagnostics come from the kernel runtime
+rather than the syscall runtime. The hosted-only builtins above (`input`,
+`read_file`, `argv`, `env`, the `fd_*` family, ...) are rejected with an
+error that names the flag, instead of emitting a syscall into a kernel.
+
+The same flag unlocks the machine builtins:
+
+| Call | Effect |
+|---|---|
+| `peek8/16/32/64(a)`, `poke8/16/32/64(a, v)` | memory read/write at a physical address, byte-granular |
+| `outb(port, v)`, `inb(port)`, `io_wait()` | port I/O |
+| `hlt()`, `cli()`, `sti()` | idle and interrupt control |
+| `lgdt(a)`, `lidt(a)`, `ltr(sel)`, `invlpg(a)` | descriptor tables, TSS, paging flush |
+| `read_cr2()`, `read_cr3()`, `write_cr3(v)`, `rdtsc()`, `iretq(frame)` | faults, address space, timing, ring 3 |
+| `fb_fill(x, y, w, h, c)`, `fb_text(x, y, c, s)` | rectangles and 8x8 text in the framebuffer |
+| `fb_char(x, y, c, ch)` | one glyph, for text held in a buffer |
+| `fb_back()`, `fb_present(x0, y0, x1, y1)` | draw off-screen, then copy the damaged rectangle out |
+| `fb_clip(x0, y0, x1, y1)` | keep fills inside a rectangle, so a band repaint costs the band |
+| `fb_indexed(x, y, scale, buf, w, h)` | blit palette-indexed pixels out of a buffer, whole-pixel scale |
+| `console_place(x, y)`, `console_hide()` | move the runtime's text grid, or park it |
+| `console_dirty()` | the console cells repainted since the last call: 1 plus four cell coordinates |
+| `ata_read(lba, n, addr)`, `ata_write(lba, n, addr)` | PIO sectors of the IDE slave disk |
+
+Each one is a plain `call __k_<name>`. `Kernel/kruntime.s` holds those stubs, the
+VBE 1280x1024x32 text console, the COM1 log and the bump allocator;
+`Kernel/build.sh` links the result into `Kernel/kernel.elf` and
+`Kernel/kernel.bin`.
+
+`Kernel/build.sh` also assembles `Kernel/mbr.s` (the 512-byte boot sector) and
+`Kernel/boot.s` (the long-mode trampoline) and writes `Kernel/kernel.img`: boot
+sector, then the flat image, ready to boot as a raw disk.
+
+```bash
+./Kernel/build.sh
+truncate -s 512K fs.img     # the filesystem disk, formatted on first boot
+qemu-system-x86_64 -drive file=Kernel/kernel.img,format=raw,if=ide,index=0 \
+  -drive file=fs.img,format=raw,if=ide,index=1 \
+  -serial stdio
+```
+
+`Kernel/main.tl` is an ordinary tlang program, and what it draws is a desktop
+at 1280x1024x32: a gradient wallpaper, a column of round app icons, a taskbar
+with one button per app, and windows with gradient title bars, round close
+buttons and drop shadows. Shapes are filled through `span8`, which blends the
+boundary pixels, so circles and rounded corners are antialiased rather than
+stepped.
+
+It is a window manager, not a fixed layout: a table of windows in back-to-front
+order, focus follows the window you click, a title bar drags a window and
+repaints only the band it left and entered, and a close button removes it until
+its icon or taskbar button brings it back. Repaints are composed into a back
+buffer and then copied out with `fb_present`, so the erase between the two
+halves of an update never reaches the screen: every change adds its rectangle to
+one damage union, the loop copies that union once per frame, and `fb_clip`
+narrows the runtime's fills to the band a drag actually touched. The runtime
+paints the terminal's cells as text arrives, so `console_dirty` tells the window
+manager which cells to present — and it repaints their band through the
+z-order when another window covers the terminal, rather than letting glyphs land
+on top of it. Six apps:
+
+| App | What it is |
+|---|---|
+| terminal | the runtime's text console, placed inside the frame |
+| editor | a text buffer with arrows, Backspace, Enter and Ctrl+S |
+| files | the directory; click a name to open it in the editor |
+| system | the about panel, drawn entirely by `main.tl` |
+| paint | a 96x64 canvas of 16 colours, saved to TLFS with Ctrl+S |
+| viewer | the saved canvas, read back from TLFS, at 1x to 4x |
+
+Files live on the IDE slave disk in TLFS: a superblock, a 16-entry directory in
+sector 1, and fixed 16-sector slots from LBA 2, so a file is at most 8 KiB and
+survives a reboot. A save writes the data sectors first and the directory entry
+last, so a machine that dies in between keeps the old size instead of a torn
+file; a size read back from the directory is clamped to 8 KiB before anything
+indexes with it; and a disk that will not read is reported as `[fs] disk error`
+rather than formatted over. The writer goes through `ata_read`/`ata_write`; the
+master disk holds the kernel image and is never written. The mouse is polled
+(there are no interrupts yet), and a packet that loses a byte is dropped once
+the controller goes idle, so the next packet starts in step.
+
+The terminal understands:
+
+| Command | Effect |
+|---|---|
+| `help` | list the commands |
+| `about` | version and what the kernel is |
+| `echo TEXT` | print TEXT back |
+| `clear` | blank the window |
+| `ticks` | `rdtsc` count |
+| `mouse` | pointer position |
+| `ls` | list the files with their sizes |
+| `cat NAME` | print a file |
+| `write NAME TEXT` | save TEXT as NAME |
+| `rm NAME` | delete a file |
+| `edit NAME` | open it in the editor |
+| `halt` | stop the machine |
+
+Backspace edits the line, Enter runs it, and anything else is reported as an
+unknown command. In the editor, Ctrl+S writes the buffer back to the file.
+`halt` writes to port `0xf4`, so QEMU's `isa-debug-exit` device turns the run
+into an exit status; `Tests/kernel_test.py` drives the mouse and the keyboard
+through QEMU's monitor, writes a file, edits it with Ctrl+S, halts, boots again
+over the same disk image and checks that the edited file is still there. A QEMU
+without GTK/SDL can still show the screen over VNC
+(`-display vnc=127.0.0.1:1`).
 
 ---
 
@@ -478,11 +632,11 @@ with the self-hosted compiler as well as stage 0.
 
 | Program | Size | |
 |---|---|---|
-| `Programs/tbox.tl` | 8,741 B | `wc`, `head`, `tail`, `grep` in one binary |
-| `Programs/tjson.tl` | 16,059 B | JSON validate / pretty-print / query |
-| `Programs/tbf.tl` | 5,198 B | a Brainfuck interpreter — a real bytecode VM |
-| `Programs/tchip8.tl` | 31,316 B | a CHIP-8 interpreter with terminal and X11 displays |
-| `Programs/tgameboy.tl` | 46,419 B | a Game Boy DMG CPU, joypad and background PPU |
+| `Programs/tbox.tl` | 7,106 B | `wc`, `head`, `tail`, `grep` in one binary |
+| `Programs/tjson.tl` | 13,510 B | JSON validate / pretty-print / query |
+| `Programs/tbf.tl` | 4,605 B | a Brainfuck interpreter — a real bytecode VM |
+| `Programs/tchip8.tl` | 22,849 B | a CHIP-8 interpreter with terminal and X11 displays |
+| `Programs/tgameboy.tl` | 35,151 B | a Game Boy DMG CPU, joypad and background PPU |
 
 ### tbox — four tools, one binary
 
@@ -706,7 +860,9 @@ implements `TPIDR_EL0` so libc can install its TLS, and serves `writev`,
 binaries are rejected at load time; a static glibc binary stops on a SIMD
 arithmetic instruction the interpreter does not implement. Instruction and
 syscall coverage, the memory model, build options and limitations are in
-[`taarch64/README.md`](taarch64/README.md).
+[`taarch64/README.md`](taarch64/README.md). `python3 taarch64/bifrost_test.py`
+runs further static guests from a bifrost-emu download when one is available,
+comparing each one with `qemu-aarch64`.
 
 Both compiler stages build it: `./taarch64/build.sh --selfhost` produces the
 interpreter with `Build/tcomp`, and that build runs the same musl guests. It is
@@ -733,7 +889,7 @@ it cannot preserve, because a silent semantic change is worse than an error.
 `gcc -O1`, once through the translator, and then rebuilds each translation with
 the self-hosted compiler. All three must agree on stdout and exit status.
 **16 programs, byte-identical output; 256,816 B of gcc binaries against
-19,621 B of tlang (13.1×).**
+17,994 B of tlang (14.3×).**
 
 | C | tlang |
 |---|---|
@@ -778,14 +934,14 @@ allocations are rejected instead of silently using the wrong byte size.
 2. **Assembler notes off.** GNU `as` adds a 48-byte `.note.gnu.property` (the
    x86 ISA/feature bits) and two program headers that point at it. No loader
    reads either, and `as -mx86-used-note=no` drops both: 160 bytes of headers,
-   and 165 bytes once hello world's alignment is counted (494 B → 329 B). A
+   and 162 bytes once hello world's alignment is counted (483 B → 321 B). A
    larger program can lose the gain again to the page boundary in front of
    `.data`.
 3. **Section headers removed after linking.** The kernel runs a binary from its
    program headers alone; the 320 bytes of section headers and the 28-byte
    section-name table are pure weight in a file this size. Dropping them
    (`Bootstrap/elf.py`, the same trick as `sstrip`) takes hello world from
-   680 B to 329 B.
+   669 B to 321 B.
 4. **Conditional runtime.** Each helper declares its dependencies, so a program
    that never prints ships no I/O code at all; unreferenced data such as the
    out-of-memory message is not emitted either.
@@ -800,10 +956,20 @@ allocations are rejected instead of silently using the wrong byte size.
    smallest programs because the file is dominated by fixed ELF overhead, but
    the loop bodies do — and **1.75×** the run speed on the original passes,
    **2.09×** on a loop whose body is mostly conditions.
-7. **Link flags.** `-s -z noseparate-code --build-id=none`: a do-nothing
+7. **Slot roundtrip folding.** Instruction selection writes every value into a
+   frame slot, and the next instruction usually reads it back: an argument is
+   stored and then loaded into its ABI register, a call result is stored and
+   then loaded so it can be added. A pass over each function
+   (`Bootstrap/opt.py`) folds a store into its only reader when the slot is
+   dead afterwards. Slots are reused from statement to statement, so it
+   consults block liveness instead of "read once in the function". Worth 8% of
+   taarch64's instruction lines — 59,201 B → **51,387 B**, and **11.8 s →
+   9.8 s** on a 20M-iteration guest loop — and 191,744 B → 167,375 B on the
+   stage-1 build.
+8. **Link flags.** `-s -z noseparate-code --build-id=none`: a do-nothing
    program is 185 B after the post-link trim, versus 4,616 B with plain `ld`.
-8. **`.bss` for buffers.** The 64 MB string arena is NOBITS — it costs 0 file bytes.
-9. **Direct syscalls.** `write`, `read`, `open`, `close`, `exit` — no wrappers.
+9. **`.bss` for buffers.** The 64 MB string arena is NOBITS — it costs 0 file bytes.
+10. **Direct syscalls.** `write`, `read`, `open`, `close`, `exit` — no wrappers.
 
 The templates in `isa.py` are written for clarity, so a naive expansion of
 `x = x + 1` is three instructions and an unused call result is stored anyway.
@@ -837,7 +1003,8 @@ that writes the string, calls a function (a global's `len()` could have
 changed) or stores a byte into it — storing `\0` would move the end.
 
 The rest of the passes are deliberately local: a rewrite only fires when the
-adjacent instruction makes it provably equivalent. `Tests/diff_test.py` checks
+surrounding instructions make it provably equivalent, and the slot fold
+consults block liveness before it drops a store. `Tests/diff_test.py` checks
 that compiling every case, every example and 150 generated programs with and
 without optimization produces identical output.
 
@@ -845,8 +1012,8 @@ without optimization produces identical output.
 
 | | |
 |---|---|
-| Compile time, `Examples/fizzbuzz.tl` | 49.9 ms optimized, 50.2 ms with `--no-opt` |
-| Compile time, `tcomp.tl` (4,142 lines + 1,505 generated) | 395 ms optimized, 346 ms with `--no-opt` |
+| Compile time, `Examples/fizzbuzz.tl` | 54 ms optimized, 52 ms with `--no-opt` |
+| Compile time, `tcomp.tl` (5,252 lines + 1,974 generated) | 465 ms optimized, 435 ms with `--no-opt` |
 | Run time, 20M-iteration loop + `fib(27)` | 64.1 ms with `--no-opt` → **36.6 ms** |
 
 Removing the section headers is the one change that costs something: a stripped
@@ -864,7 +1031,7 @@ tlang source
    ↓ lower      three-address IR with virtual registers
    ↓ optimize   hoist / fold / coalesce / dead-definition elimination (optir.py)
    ↓ select     IR op -> instruction template (table-driven)
-   ↓ peephole   local rewrites
+   ↓ peephole   local rewrites, slot folding
    ↓ emit       x86-64 assembly (Intel syntax)
    ↓ as, ld     native ELF
    ↓ sstrip     section headers and tail removed                 (elf.py)
@@ -884,7 +1051,10 @@ expanded by a template in `Bootstrap/isa.py`, with typed operands (`Reg`, `Mem`,
 The fixed point is checked by `Tests/fixedpoint.py`: stage 1 compiles
 `tcomp.tl` into stage 2, stage 2 compiles it into stage 3, and stage 2 and
 stage 3 must be **byte-identical** — that is what proves the language can
-express its own compiler. Both compilers pass the same behavioral suite.
+express its own compiler. Both compilers pass the same behavioral suite and
+reject the same programs with the same diagnostic text; only the reported
+column can differ, because stage 0 points at an expression's start and
+the self-hosted compiler at the operator it reached.
 
 The runtime assembly, builtin metadata and kind-compatibility rule are defined
 once: `Bootstrap/runtime.py` is generated into `Runtime/runtime_gen.tl`,
@@ -895,8 +1065,9 @@ tables. `Tools/selfhost.py` is the single bootstrap/link/fixed-point verifier
 used by the shell command, `Tests/fixedpoint.py` and CI.
 
 The self-hosted compiler is deliberately simpler than stage 0: it emits a fixed
-4 KB frame per function and compiles in a single pass without an AST. It has no
-IR, so its rewrites — compare-into-branch, placing up to three plain arguments
+4 KB frame per function and compiles in a single pass without an AST. A short
+prescan collects top-level names first, so a function may use a struct or global
+declared later in the file. It has no IR, so its rewrites — compare-into-branch, placing up to three plain arguments
 straight into their parameter registers, folding a load into the copy that
 consumes it, weaving a small constant or a memory operand into the operation, and
 narrowing a constant load — run as a peephole over a ten-line window of its
@@ -907,7 +1078,7 @@ output.
 ## Tests
 
 ```bash
-python3 Tests/version_test.py   # stage 0 and tcomp.tl report tcomp 1.1.0
+python3 Tests/version_test.py   # stage 0 and tcomp.tl report tcomp 1.2.0
 python3 Tests/run_tests.py      # golden output + exit status + binary size
 python3 Tests/diff_test.py      # optimizer must not change behaviour
 python3 Tests/programs_test.py  # tbox, against real arguments and real grep
@@ -916,7 +1087,11 @@ python3 Tests/chip8_test.py     # CHIP-8 frames against a Python reference
 python3 Tests/fixedpoint.py     # self-hosting: stages, byte comparison, suite
 python3 Tests/builtins_test.py  # one generated builtin contract for both compilers
 python3 Tests/runtime_test.py   # runtime dependency closure and assembly
-python3 Tests/errors_test.py    # both compilers must reject bad programs
+python3 Tests/freestanding_test.py     # kernel image: no syscalls, links, refuses misuse
+python3 Tests/machine_builtins_test.py # machine builtins and the kernel runtime stubs
+python3 Tests/env_test.py       # environment lookup in both compilers
+python3 Tests/kernel_test.py   # boots the desktop, clicks and types at it
+python3 Tests/errors_test.py    # same rejections and messages in both compilers
 python3 Tests/compare_test.py   # stage 0 and self-hosted compiler must agree
 python3 Tests/sourcemap_test.py # imported-file errors name the imported file
 python3 Tests/bounds_test.py    # checked indexing and runtime safety guards
@@ -929,6 +1104,9 @@ python3 Benchmarks/float_bench.py  # float vs int vs C, same dependent loop
 python3 Tests/stress_test.py    # generated programs vs a Python model
 Tools/selfhost.sh --verify      # bootstrap and fixed-point check, step by step
 ```
+
+CI runs every suite above on each push and pull request, except the float
+benchmark, which measures performance rather than correctness.
 
 Cases live in `Tests/Cases/`: `NAME.tl` with optional `NAME.in` (stdin),
 `NAME.out` (expected stdout) and `NAME.code` (expected exit status).
@@ -985,7 +1163,11 @@ Tests/chip8_test.py   CHIP-8 frames against a Python reference
 Tests/fixedpoint.py   self-hosting stages, byte comparison and golden suite
 Tests/builtins_test.py builtin metadata contract across both compilers
 Tests/runtime_test.py runtime dependency closure and assembly
-Tests/errors_test.py  programs both compilers are expected to reject
+Tests/freestanding_test.py freestanding build mode and kernel linker script
+Tests/machine_builtins_test.py machine builtins and kernel runtime stubs
+Tests/env_test.py     environment variable lookup in both compilers
+Tests/kernel_test.py  boots the desktop, clicks and types at it, checks the log
+Tests/errors_test.py  identical rejections and diagnostics in both compilers
 Tests/compare_test.py stage 0 vs self-hosted differential test
 Tests/sourcemap_test.py imported-file diagnostics name the imported file
 Tests/bounds_test.py  checked indexing and runtime safety guards
@@ -1005,6 +1187,8 @@ Examples/             hello, fib, fizzbuzz, primes, guess, words, tchip8-demo.ch
 Programs/             tbox, tjson, tbf, tchip8, tgameboy: real programs, not demos
 Programs/tbox.c       hosted C equivalent of tbox, for comparison
 taarch64/             user-mode AArch64 interpreter for static binaries
+Kernel/               freestanding kernel: main.tl, kruntime.s, font8.s, mbr.s,
+                      boot.s, kernel.ld, build.sh
 ```
 
 ---
@@ -1045,6 +1229,8 @@ taarch64/             user-mode AArch64 interpreter for static binaries
 * `append` copies the array when it grows, so aliases taken before a growth
   keep pointing at the old block and do not see later elements.
 * No closures or generics.
+* A `const` holds an int or string literal only: there are no const
+  expressions and no const arrays. A `\xNN` string is the byte-table form.
 * `print_float` and `str(float)` use six fractional digits. `str` trims
   trailing zeros (`str(2.0)` is `"2"`), so magnitudes below `1e-6` print as
   `0` (or `-0`). Integer parts up to the 64-bit range are exact; beyond that,
@@ -1076,14 +1262,14 @@ taarch64/             user-mode AArch64 interpreter for static binaries
   `str(f())`, `f().field` and `for x in f()` work without an annotation.
   Recursive functions and calls to functions declared later stay untyped, and
   a mixed array literal has no element kind.
-* The self-hosted compiler assigns to `name`, `name[…]` and `name.field` only;
-  nested targets such as `a[i].f = x` need the stage-0 compiler.
 * Stage 0 optimizes at the IR level; the self-hosted compiler emits straight
-  from the parse with no IR, so its output is usually larger (hello: 386 B
-  versus 329 B). A five-line peephole over its output recovers the comparison
+  from the parse with no IR, so its output is usually larger (hello: 363 B
+  versus 321 B). A ten-line peephole over its output recovers the comparison
   tail and the operand push/pop, which is enough to beat stage 0 on branchy code
-  (fizzbuzz: 652 B versus 749 B). Both binaries are trimmed the same way after
-  linking.
+  (fizzbuzz: 629 B versus 665 B). Slot folding is stage 0's alone: it exists to
+  undo the slots instruction selection writes, and the self-hosted compiler
+  already places arguments in their registers as it emits them. Both binaries
+  are trimmed the same way after linking.
 * Kinds are checked at call sites, returns and builtin arguments, but not
   through arithmetic: adding a struct to an integer is not rejected, struct
   constructor fields are not checked, and unannotated values are trusted.
@@ -1092,7 +1278,13 @@ taarch64/             user-mode AArch64 interpreter for static binaries
   frame slots per function, and 500 nested loops. Exceeding a limit is a
   diagnostic, not memory corruption; stage 0 grows dynamically. Imports are
   expanded into a 4 MB source buffer, and a larger expansion is an error.
-* Linux x86-64 only.
+* Linux x86-64 only. The freestanding kernel boots under QEMU but is early: a
+  1280x1024x32 VBE desktop with six apps and a persistent filesystem, a polled
+  mouse and keyboard, COM1 output, a bump allocator over a fixed 1 MiB arena, an
+  identity map of the first GiB plus the top quarter, no interrupts, and no user
+  mode (K2 onwards). Every app runs in ring 0 inside the one address space, and
+  a buffer's address has to be coerced with `| 0` to reach a machine builtin,
+  because a buffer is not accepted where an integer is wanted.
 
 ---
 

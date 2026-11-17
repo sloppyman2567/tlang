@@ -13,7 +13,7 @@ LEVELS = [
     ["&"],
     ["==", "!="],
     ["<", "<=", ">", ">="],
-    ["<<", ">>"],
+    ["<<", ">>>", ">>"],
     ["+", "-"],
     ["*", "/", "%"],
 ]
@@ -23,7 +23,8 @@ MAX_PARAMS = 6
 # `x += 1` is sugar for `x = x + 1`; the target is evaluated twice, so it is
 # restricted to a plain variable (no index or field to recompute).
 COMPOUND = {"+=": "+", "-=": "-", "*=": "*", "/=": "/", "%=": "%",
-            "&=": "&", "|=": "|", "^=": "^", "<<=": "<<", ">>=": ">>"}
+            "&=": "&", "|=": "|", "^=": "^", "<<=": "<<", ">>>=": ">>>",
+            ">>=": ">>"}
 
 
 class Parser:
@@ -93,6 +94,7 @@ class Parser:
         structs = []
         funcs = []
         globals_list = []
+        consts = []
         while not self.at("eof"):
             self.skip_semis()
             if self.at("eof"):
@@ -105,12 +107,37 @@ class Parser:
                 node = self.parse_let()
                 globals_list.append(A.Global(name=node.name, expr=node.expr,
                                              line=node.line, col=node.col))
+            elif self.at_kw("const"):
+                consts.append(self.parse_const())
             else:
                 self.error(
-                    "expected 'fn', 'struct' or a global 'let', "
+                    "expected 'fn', 'struct', a global 'let' or a 'const', "
                     f"found {self.describe(self.tok)}"
                 )
-        return A.Program(structs=structs, funcs=funcs, globals=globals_list)
+        return A.Program(structs=structs, funcs=funcs, globals=globals_list,
+                         consts=consts)
+
+    def parse_const(self):
+        """`const NAME = <int or string literal>`; the name has no storage."""
+        start = self.expect_kw("const")
+        name = self.expect("ident", "a const name")
+        self.expect("=", "'=' after a const name")
+        sign = None
+        if self.at("-"):
+            sign = self.advance()
+        if self.at("int"):
+            tok = self.advance()
+            value = -tok.val if sign is not None else tok.val
+            return A.Const(name=name.val, expr=A.Num(value=value, line=tok.line,
+                                                    col=tok.col),
+                           line=start.line, col=start.col)
+        if sign is None and self.at("str"):
+            tok = self.advance()
+            return A.Const(name=name.val, expr=A.Str(value=tok.val, line=tok.line,
+                                                    col=tok.col),
+                           line=start.line, col=start.col)
+        self.error(f"const '{name.val}' needs an int or string literal",
+                   sign or self.tok)
 
     def parse_type_name(self, what):
         """A scalar type name, or `T[]` for an array of T."""

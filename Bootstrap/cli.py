@@ -13,7 +13,9 @@ from .errors import TlangError
 
 
 def cmd_build(ns):
-    asm, module = compile_path(ns.file, opt=not ns.no_opt)
+    asm, module = compile_path(ns.file, opt=not ns.no_opt,
+                               freestanding=ns.freestanding, entry=ns.entry,
+                               bounds=not ns.no_bounds)
     if ns.ir:
         print(module.format_ir())
         return 0
@@ -21,12 +23,17 @@ def cmd_build(ns):
         print(asm, end="")
         return 0
     out = ns.output or os.path.splitext(os.path.basename(ns.file))[0]
-    size = build(asm, out, ns.keep_asm, sstrip=not ns.keep_sections)
+    size = build(asm, out, ns.keep_asm, sstrip=not ns.keep_sections,
+                 freestanding=ns.freestanding, script=ns.script)
     print(f"tcomp: {out} ({size} bytes)")
     return 0
 
 
 def cmd_run(ns):
+    if ns.freestanding or "--freestanding" in ns.args:
+        print("tcomp: --freestanding has nothing to exec into; "
+              "use 'tcomp build --freestanding -T SCRIPT'", file=sys.stderr)
+        return 1
     asm, _module = compile_path(ns.file, opt=not ns.no_opt)
     workdir = tempfile.mkdtemp(prefix="tcomp-run-")
     try:
@@ -59,9 +66,20 @@ def main(argv=None):
                         "readable by objdump/readelf)")
     b.add_argument("--no-opt", action="store_true",
                    help="skip IR optimization (for debugging codegen)")
+    b.add_argument("--no-bounds", action="store_true",
+                   help="omit index bounds checks (emulator hot loops only)")
+    b.add_argument("--freestanding", action="store_true",
+                   help="emit a kernel image: no argv, no exit syscall, and "
+                        "runtime entry points come from a kernel runtime")
+    b.add_argument("--entry", default="main", metavar="NAME",
+                   help="function _start calls (default: main)")
+    b.add_argument("-T", "--script", metavar="PATH",
+                   help="linker script for the image")
 
     r = sub.add_parser("run", help="compile to a temporary directory and run")
     r.add_argument("file")
+    r.add_argument("--freestanding", action="store_true",
+                   help="rejected: a kernel image cannot run as a process")
     r.add_argument("--no-opt", action="store_true",
                    help="skip IR optimization (for debugging codegen)")
     r.add_argument("args", nargs=argparse.REMAINDER,

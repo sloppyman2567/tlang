@@ -109,5 +109,592 @@ fn builtin_kind(n: str) -> int {
   if str_eq(n, "str_diff") == 1 {
     return 36
   }
+  if str_eq(n, "env") == 1 {
+    return 72
+  }
+  if str_eq(n, "clz") == 1 {
+    return 73
+  }
+  if str_eq(n, "rbit") == 1 {
+    return 74
+  }
+  if str_eq(n, "bswap16") == 1 {
+    return 75
+  }
+  if str_eq(n, "bswap32") == 1 {
+    return 76
+  }
+  if str_eq(n, "bswap64") == 1 {
+    return 77
+  }
+  if str_eq(n, "sext8") == 1 {
+    return 78
+  }
+  if str_eq(n, "sext16") == 1 {
+    return 79
+  }
+  if str_eq(n, "sext32") == 1 {
+    return 80
+  }
+  if str_eq(n, "udiv") == 1 {
+    return 81
+  }
+  if str_eq(n, "umod") == 1 {
+    return 82
+  }
+  if str_eq(n, "rol8") == 1 {
+    return 83
+  }
+  if str_eq(n, "ror8") == 1 {
+    return 84
+  }
+  if str_eq(n, "ld8") == 1 {
+    return 85
+  }
+  if str_eq(n, "ld16") == 1 {
+    return 86
+  }
+  if str_eq(n, "ld32") == 1 {
+    return 87
+  }
+  if str_eq(n, "ld64") == 1 {
+    return 88
+  }
+  if str_eq(n, "st8") == 1 {
+    return 89
+  }
+  if str_eq(n, "st16") == 1 {
+    return 90
+  }
+  if str_eq(n, "st32") == 1 {
+    return 91
+  }
+  if str_eq(n, "st64") == 1 {
+    return 92
+  }
+  if str_eq(n, "memcpy") == 1 {
+    return 93
+  }
+  if str_eq(n, "memset") == 1 {
+    return 94
+  }
+  if str_eq(n, "peek8") == 1 {
+    return 37
+  }
+  if str_eq(n, "peek16") == 1 {
+    return 38
+  }
+  if str_eq(n, "peek32") == 1 {
+    return 39
+  }
+  if str_eq(n, "peek64") == 1 {
+    return 40
+  }
+  if str_eq(n, "poke8") == 1 {
+    return 41
+  }
+  if str_eq(n, "poke16") == 1 {
+    return 42
+  }
+  if str_eq(n, "poke32") == 1 {
+    return 43
+  }
+  if str_eq(n, "poke64") == 1 {
+    return 44
+  }
+  if str_eq(n, "outb") == 1 {
+    return 45
+  }
+  if str_eq(n, "inb") == 1 {
+    return 46
+  }
+  if str_eq(n, "io_wait") == 1 {
+    return 47
+  }
+  if str_eq(n, "hlt") == 1 {
+    return 48
+  }
+  if str_eq(n, "cli") == 1 {
+    return 49
+  }
+  if str_eq(n, "sti") == 1 {
+    return 50
+  }
+  if str_eq(n, "lgdt") == 1 {
+    return 51
+  }
+  if str_eq(n, "lidt") == 1 {
+    return 52
+  }
+  if str_eq(n, "ltr") == 1 {
+    return 53
+  }
+  if str_eq(n, "invlpg") == 1 {
+    return 54
+  }
+  if str_eq(n, "read_cr2") == 1 {
+    return 55
+  }
+  if str_eq(n, "read_cr3") == 1 {
+    return 56
+  }
+  if str_eq(n, "write_cr3") == 1 {
+    return 57
+  }
+  if str_eq(n, "rdtsc") == 1 {
+    return 58
+  }
+  if str_eq(n, "iretq") == 1 {
+    return 59
+  }
+  if str_eq(n, "fb_fill") == 1 {
+    return 60
+  }
+  if str_eq(n, "fb_text") == 1 {
+    return 61
+  }
+  if str_eq(n, "console_place") == 1 {
+    return 62
+  }
+  if str_eq(n, "console_hide") == 1 {
+    return 63
+  }
+  if str_eq(n, "ata_read") == 1 {
+    return 64
+  }
+  if str_eq(n, "ata_write") == 1 {
+    return 65
+  }
+  if str_eq(n, "fb_char") == 1 {
+    return 66
+  }
+  if str_eq(n, "fb_back") == 1 {
+    return 67
+  }
+  if str_eq(n, "fb_present") == 1 {
+    return 68
+  }
+  if str_eq(n, "console_dirty") == 1 {
+    return 69
+  }
+  if str_eq(n, "fb_clip") == 1 {
+    return 70
+  }
+  if str_eq(n, "fb_indexed") == 1 {
+    return 71
+  }
   return 0
+}
+
+fn builtin_hosted(n: str) -> int {
+  if str_eq(n, "input") == 1 {
+    return 1
+  }
+  if str_eq(n, "read_file") == 1 {
+    return 1
+  }
+  if str_eq(n, "argv") == 1 {
+    return 1
+  }
+  if str_eq(n, "argc") == 1 {
+    return 1
+  }
+  if str_eq(n, "file_size") == 1 {
+    return 1
+  }
+  if str_eq(n, "sock") == 1 {
+    return 1
+  }
+  if str_eq(n, "fd_read") == 1 {
+    return 1
+  }
+  if str_eq(n, "fd_write") == 1 {
+    return 1
+  }
+  if str_eq(n, "fd_poll") == 1 {
+    return 1
+  }
+  if str_eq(n, "arena_mark") == 1 {
+    return 1
+  }
+  if str_eq(n, "arena_release") == 1 {
+    return 1
+  }
+  if str_eq(n, "write_file") == 1 {
+    return 1
+  }
+  if str_eq(n, "append_file") == 1 {
+    return 1
+  }
+  if str_eq(n, "file_exists") == 1 {
+    return 1
+  }
+  if str_eq(n, "shm") == 1 {
+    return 1
+  }
+  if str_eq(n, "fd_pwrite") == 1 {
+    return 1
+  }
+  if str_eq(n, "fd_send") == 1 {
+    return 1
+  }
+  if str_eq(n, "env") == 1 {
+    return 1
+  }
+  return 0
+}
+
+fn builtin_kernel(n: str) -> int {
+  if str_eq(n, "peek8") == 1 {
+    return 1
+  }
+  if str_eq(n, "peek16") == 1 {
+    return 1
+  }
+  if str_eq(n, "peek32") == 1 {
+    return 1
+  }
+  if str_eq(n, "peek64") == 1 {
+    return 1
+  }
+  if str_eq(n, "poke8") == 1 {
+    return 1
+  }
+  if str_eq(n, "poke16") == 1 {
+    return 1
+  }
+  if str_eq(n, "poke32") == 1 {
+    return 1
+  }
+  if str_eq(n, "poke64") == 1 {
+    return 1
+  }
+  if str_eq(n, "outb") == 1 {
+    return 1
+  }
+  if str_eq(n, "inb") == 1 {
+    return 1
+  }
+  if str_eq(n, "io_wait") == 1 {
+    return 1
+  }
+  if str_eq(n, "hlt") == 1 {
+    return 1
+  }
+  if str_eq(n, "cli") == 1 {
+    return 1
+  }
+  if str_eq(n, "sti") == 1 {
+    return 1
+  }
+  if str_eq(n, "lgdt") == 1 {
+    return 1
+  }
+  if str_eq(n, "lidt") == 1 {
+    return 1
+  }
+  if str_eq(n, "ltr") == 1 {
+    return 1
+  }
+  if str_eq(n, "invlpg") == 1 {
+    return 1
+  }
+  if str_eq(n, "read_cr2") == 1 {
+    return 1
+  }
+  if str_eq(n, "read_cr3") == 1 {
+    return 1
+  }
+  if str_eq(n, "write_cr3") == 1 {
+    return 1
+  }
+  if str_eq(n, "rdtsc") == 1 {
+    return 1
+  }
+  if str_eq(n, "iretq") == 1 {
+    return 1
+  }
+  if str_eq(n, "fb_fill") == 1 {
+    return 1
+  }
+  if str_eq(n, "fb_text") == 1 {
+    return 1
+  }
+  if str_eq(n, "console_place") == 1 {
+    return 1
+  }
+  if str_eq(n, "console_hide") == 1 {
+    return 1
+  }
+  if str_eq(n, "ata_read") == 1 {
+    return 1
+  }
+  if str_eq(n, "ata_write") == 1 {
+    return 1
+  }
+  if str_eq(n, "fb_char") == 1 {
+    return 1
+  }
+  if str_eq(n, "fb_back") == 1 {
+    return 1
+  }
+  if str_eq(n, "fb_present") == 1 {
+    return 1
+  }
+  if str_eq(n, "console_dirty") == 1 {
+    return 1
+  }
+  if str_eq(n, "fb_clip") == 1 {
+    return 1
+  }
+  if str_eq(n, "fb_indexed") == 1 {
+    return 1
+  }
+  return 0
+}
+
+# Argument count of a machine builtin; 0 for anything else.
+fn builtin_arity(n: str) -> int {
+  if str_eq(n, "peek8") == 1 {
+    return 1
+  }
+  if str_eq(n, "peek16") == 1 {
+    return 1
+  }
+  if str_eq(n, "peek32") == 1 {
+    return 1
+  }
+  if str_eq(n, "peek64") == 1 {
+    return 1
+  }
+  if str_eq(n, "poke8") == 1 {
+    return 2
+  }
+  if str_eq(n, "poke16") == 1 {
+    return 2
+  }
+  if str_eq(n, "poke32") == 1 {
+    return 2
+  }
+  if str_eq(n, "poke64") == 1 {
+    return 2
+  }
+  if str_eq(n, "outb") == 1 {
+    return 2
+  }
+  if str_eq(n, "inb") == 1 {
+    return 1
+  }
+  if str_eq(n, "io_wait") == 1 {
+    return 0
+  }
+  if str_eq(n, "hlt") == 1 {
+    return 0
+  }
+  if str_eq(n, "cli") == 1 {
+    return 0
+  }
+  if str_eq(n, "sti") == 1 {
+    return 0
+  }
+  if str_eq(n, "lgdt") == 1 {
+    return 1
+  }
+  if str_eq(n, "lidt") == 1 {
+    return 1
+  }
+  if str_eq(n, "ltr") == 1 {
+    return 1
+  }
+  if str_eq(n, "invlpg") == 1 {
+    return 1
+  }
+  if str_eq(n, "read_cr2") == 1 {
+    return 0
+  }
+  if str_eq(n, "read_cr3") == 1 {
+    return 0
+  }
+  if str_eq(n, "write_cr3") == 1 {
+    return 1
+  }
+  if str_eq(n, "rdtsc") == 1 {
+    return 0
+  }
+  if str_eq(n, "iretq") == 1 {
+    return 1
+  }
+  if str_eq(n, "fb_fill") == 1 {
+    return 5
+  }
+  if str_eq(n, "fb_text") == 1 {
+    return 4
+  }
+  if str_eq(n, "console_place") == 1 {
+    return 2
+  }
+  if str_eq(n, "console_hide") == 1 {
+    return 0
+  }
+  if str_eq(n, "ata_read") == 1 {
+    return 3
+  }
+  if str_eq(n, "ata_write") == 1 {
+    return 3
+  }
+  if str_eq(n, "fb_char") == 1 {
+    return 4
+  }
+  if str_eq(n, "fb_back") == 1 {
+    return 0
+  }
+  if str_eq(n, "fb_present") == 1 {
+    return 4
+  }
+  if str_eq(n, "console_dirty") == 1 {
+    return 0
+  }
+  if str_eq(n, "fb_clip") == 1 {
+    return 4
+  }
+  if str_eq(n, "fb_indexed") == 1 {
+    return 6
+  }
+  return 0
+}
+
+# Declared kind of argument i of a machine builtin, "" past the end.
+fn builtin_arg(n: str, i: int) -> str {
+  if str_eq(n, "peek8") == 1 {
+    if i == 0 { return "int" }
+    return ""
+  }
+  if str_eq(n, "peek16") == 1 {
+    if i == 0 { return "int" }
+    return ""
+  }
+  if str_eq(n, "peek32") == 1 {
+    if i == 0 { return "int" }
+    return ""
+  }
+  if str_eq(n, "peek64") == 1 {
+    if i == 0 { return "int" }
+    return ""
+  }
+  if str_eq(n, "poke8") == 1 {
+    if i == 0 { return "int" }
+    if i == 1 { return "int" }
+    return ""
+  }
+  if str_eq(n, "poke16") == 1 {
+    if i == 0 { return "int" }
+    if i == 1 { return "int" }
+    return ""
+  }
+  if str_eq(n, "poke32") == 1 {
+    if i == 0 { return "int" }
+    if i == 1 { return "int" }
+    return ""
+  }
+  if str_eq(n, "poke64") == 1 {
+    if i == 0 { return "int" }
+    if i == 1 { return "int" }
+    return ""
+  }
+  if str_eq(n, "outb") == 1 {
+    if i == 0 { return "int" }
+    if i == 1 { return "int" }
+    return ""
+  }
+  if str_eq(n, "inb") == 1 {
+    if i == 0 { return "int" }
+    return ""
+  }
+  if str_eq(n, "lgdt") == 1 {
+    if i == 0 { return "int" }
+    return ""
+  }
+  if str_eq(n, "lidt") == 1 {
+    if i == 0 { return "int" }
+    return ""
+  }
+  if str_eq(n, "ltr") == 1 {
+    if i == 0 { return "int" }
+    return ""
+  }
+  if str_eq(n, "invlpg") == 1 {
+    if i == 0 { return "int" }
+    return ""
+  }
+  if str_eq(n, "write_cr3") == 1 {
+    if i == 0 { return "int" }
+    return ""
+  }
+  if str_eq(n, "iretq") == 1 {
+    if i == 0 { return "int" }
+    return ""
+  }
+  if str_eq(n, "fb_fill") == 1 {
+    if i == 0 { return "int" }
+    if i == 1 { return "int" }
+    if i == 2 { return "int" }
+    if i == 3 { return "int" }
+    if i == 4 { return "int" }
+    return ""
+  }
+  if str_eq(n, "fb_text") == 1 {
+    if i == 0 { return "int" }
+    if i == 1 { return "int" }
+    if i == 2 { return "int" }
+    if i == 3 { return "str" }
+    return ""
+  }
+  if str_eq(n, "console_place") == 1 {
+    if i == 0 { return "int" }
+    if i == 1 { return "int" }
+    return ""
+  }
+  if str_eq(n, "ata_read") == 1 {
+    if i == 0 { return "int" }
+    if i == 1 { return "int" }
+    if i == 2 { return "int" }
+    return ""
+  }
+  if str_eq(n, "ata_write") == 1 {
+    if i == 0 { return "int" }
+    if i == 1 { return "int" }
+    if i == 2 { return "int" }
+    return ""
+  }
+  if str_eq(n, "fb_char") == 1 {
+    if i == 0 { return "int" }
+    if i == 1 { return "int" }
+    if i == 2 { return "int" }
+    if i == 3 { return "int" }
+    return ""
+  }
+  if str_eq(n, "fb_present") == 1 {
+    if i == 0 { return "int" }
+    if i == 1 { return "int" }
+    if i == 2 { return "int" }
+    if i == 3 { return "int" }
+    return ""
+  }
+  if str_eq(n, "fb_clip") == 1 {
+    if i == 0 { return "int" }
+    if i == 1 { return "int" }
+    if i == 2 { return "int" }
+    if i == 3 { return "int" }
+    return ""
+  }
+  if str_eq(n, "fb_indexed") == 1 {
+    if i == 0 { return "int" }
+    if i == 1 { return "int" }
+    if i == 2 { return "int" }
+    if i == 3 { return "int" }
+    if i == 4 { return "int" }
+    if i == 5 { return "int" }
+    return ""
+  }
+  return ""
 }

@@ -33,11 +33,15 @@ class FuncIR:
 
 
 class Module:
-    def __init__(self, funcs, strings, runtime_used, nglobals=0):
+    def __init__(self, funcs, strings, runtime_used, nglobals=0,
+                 freestanding=False, entry="main", tables=None):
         self.funcs = funcs
         self.strings = strings          # label -> raw bytes
+        self.tables = tables or {}      # label -> list of case-body labels
         self.runtime_used = runtime_used
         self.nglobals = nglobals
+        self.freestanding = freestanding
+        self.entry = entry
 
     def format_ir(self):
         return "\n\n".join(f.format() for f in self.funcs)

@@ -1,0 +1,22 @@
+# Bit primitives used by emulators: no sign extension or byte swapping by hand.
+fn main() {
+  print_int(clz(1))
+  print_int(clz(0))
+  print("\n")
+  print_int(rbit(1))
+  print("\n")
+  print_int(bswap16(0x1234))
+  print_int(bswap32(0x12345678))
+  print_int(bswap64(0x0123456789ABCDEF))
+  print("\n")
+  print_int(sext8(0xFF))
+  print_int(sext16(0x8000))
+  print_int(sext32(0xFFFFFFFF))
+  print("\n")
+  print_int(udiv(-1, 2))
+  print_int(umod(-1, 2))
+  print("\n")
+  print_int(rol8(0x81, 1))
+  print_int(ror8(0x03, 1))
+  print("\n")
+}

@@ -161,6 +161,23 @@ def main():
                     compiler, work, name, source, stdout, code, stderr))
                 print(f"  {'ok' if not failures else '..'}   {name} "
                       f"[{os.path.basename(compiler)}]")
+
+        # --no-bounds is an opt-out for emulator hot loops: valid programs
+        # still run, but the trap routine is not emitted at all.
+        nobounds = os.path.join(work, "nobounds.tl")
+        with open(nobounds, "w") as fh:
+            fh.write('fn main() { let a = alloc(3)\n  a[1] = 7\n'
+                     '  print_int(a[1]) }\n')
+        for label, argv in (
+            ("stage0", [sys.executable, TCOMP, "build", "--asm",
+                        "--no-bounds", nobounds]),
+            ("stage1", [stage1, "--no-bounds", nobounds]),
+        ):
+            proc = run(argv)
+            if proc.returncode != 0:
+                failures.append(f"--no-bounds [{label}]: {proc.stderr.strip()}")
+            elif "__t_bounds_fail" in proc.stdout:
+                failures.append(f"--no-bounds [{label}]: check still emitted")
     finally:
         shutil.rmtree(work, ignore_errors=True)
 

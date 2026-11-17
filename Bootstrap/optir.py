@@ -61,6 +61,8 @@ def _reads(ins):
         return (ins[2],)
     if op in ("jz", "jnz", "jcck", "ret"):
         return (ins[1] if op in ("jz", "jnz", "ret") else ins[2],)
+    if op == "jtable":
+        return (ins[1],)
     if op == "jcc":
         return (ins[2], ins[3])
     if op in ("call", "bcall"):
@@ -119,6 +121,8 @@ def fold_bin(kind, a, b):
         return _wrap64(a << (b & 63))
     if kind == "shr":
         return a >> (b & 63)
+    if kind == "ushr":
+        return (a & ((1 << 64) - 1)) >> (b & 63)
     if kind == "and":
         return a & b
     if kind == "or":
@@ -187,7 +191,7 @@ def fold(ins_list):
                     # Identities: with a zero operand these are free copies, and
                     # with a one the multiply or divide disappears.
                     if kb == 0 and kind in ("add", "sub", "or", "xor",
-                                            "shl", "shr"):
+                                            "shl", "shr", "ushr"):
                         new = ("mov", dst, a)
                     elif kb == 0 and kind in ("mul", "and"):
                         new = ("imm", dst, 0)
@@ -196,7 +200,7 @@ def fold(ins_list):
                     elif kind == "mul" and _is_pow2(kb):
                         new = ("bink", "shl", dst, a, kb.bit_length() - 1)
                     elif kind in ("add", "sub", "mul", "div", "mod", "shl",
-                                  "shr", "and", "or", "xor"):
+                                  "shr", "ushr", "and", "or", "xor"):
                         new = ("bink", kind, dst, a, kb)
                 if new is None and ka is not None and kind in COMMUTATIVE:
                     new = ("bink", kind, dst, b, ka)
@@ -268,7 +272,7 @@ def _copy_is_last_use(ins_list, index, src):
 
 # Anything that can be jumped to or from ends a straight-line run: a label is
 # entered from elsewhere and a branch leaves, so a value could travel around it.
-BARRIERS = {"lab", "jmp", "jz", "jnz", "jcc", "jcck", "ret", "ret0"}
+BARRIERS = {"lab", "jmp", "jz", "jnz", "jcc", "jcck", "jtable", "ret", "ret0"}
 
 
 def _dead_before_redefine(ins_list, index, slot):
@@ -289,6 +293,45 @@ def _dead_before_redefine(ins_list, index, slot):
     return True
 
 
+def _label_map(ins_list):
+    return {ins[1]: i for i, ins in enumerate(ins_list) if ins[0] == "lab"}
+
+
+def _value_dead_after(ins_list, index, slot, labels):
+    """True when `slot` is never read again before being written or returning.
+
+    Follows jumps instead of giving up at a label. A compare result feeding a
+    branch is usually dead on both edges: the fall-through returns and the
+    taken edge overwrites the same temp. A whole-function read count misses
+    that because the temp is reused by the branch target.
+    """
+    n = len(ins_list)
+    seen = set()
+    work = [index + 1]
+    while work:
+        i = work.pop()
+        if i >= n or i in seen:
+            continue
+        seen.add(i)
+        ins = ins_list[i]
+        op = ins[0]
+        if slot in _reads(ins):
+            return False
+        if writes(ins) == slot or op in ("ret", "ret0"):
+            continue
+        if op == "jmp":
+            target = labels.get(ins[1])
+            if target is not None:
+                work.append(target)
+            continue
+        if op in ("jz", "jnz", "jcc", "jcck"):
+            target = labels.get(ins[-1])
+            if target is not None:
+                work.append(target)
+        work.append(i + 1)
+    return True
+
+
 def coalesce(ins_list):
     """Remove copies and fold compare-then-branch into one jump.
 
@@ -297,6 +340,7 @@ def coalesce(ins_list):
     for IR temps, which are reused from statement to statement.
     """
     counts = read_counts(ins_list)
+    labels = _label_map(ins_list)
     out = []
     for index, ins in enumerate(ins_list):
         op = ins[0]
@@ -317,7 +361,9 @@ def coalesce(ins_list):
             prev = out[-1]
             if (counts.get(src, 0) == 1
                     or (src >= TEMP_BASE
-                        and _dead_before_redefine(ins_list, index, src))):
+                        and (_dead_before_redefine(ins_list, index, src)
+                             or _value_dead_after(ins_list, index, src,
+                                                  labels)))):
                 if prev[0] == "cmp" and prev[2] == src:
                     cc = prev[1] if op == "jnz" else INVERSE[prev[1]]
                     out[-1] = ("jcc", cc, prev[3], prev[4], target)

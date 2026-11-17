@@ -16,10 +16,21 @@ import sys
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, ROOT)
 
-from Bootstrap.builtin_spec import BUILTIN_SPECS  # noqa: E402
+from Bootstrap.builtin_spec import (  # noqa: E402
+    BUILTIN_SPECS, HOSTED_ONLY, KERNEL_ONLY,
+)
 
 PY_OUT = os.path.join(ROOT, "Bootstrap", "builtins_gen.py")
 TL_OUT = os.path.join(ROOT, "Runtime", "builtins_gen.tl")
+
+
+def _mode(name):
+    """Which build mode a builtin needs; "any" is the default."""
+    if name in KERNEL_ONLY:
+        return "kernel"
+    if name in HOSTED_ONLY:
+        return "hosted"
+    return "any"
 
 
 def _args_repr(args):
@@ -49,6 +60,11 @@ def render_py():
     for name, _ident, arity, result, symbol, _args, stage0 in BUILTIN_SPECS:
         if stage0:
             lines.append(f"    {name!r}: ({arity}, {result!r}, {symbol!r}),")
+    lines.extend(["}", "", "BUILTIN_MODES = {"])
+    for name, *_rest in BUILTIN_SPECS:
+        mode = _mode(name)
+        if mode != "any":
+            lines.append(f"    {name!r}: {mode!r},")
     lines.append("}")
     return "\n".join(lines) + "\n"
 
@@ -64,6 +80,33 @@ def render_tl():
         lines.append(f"    return {ident}")
         lines.append("  }")
     lines.extend(["  return 0", "}", ""])
+    for predicate, group in (("hosted", HOSTED_ONLY), ("kernel", KERNEL_ONLY)):
+        lines.append(f"fn builtin_{predicate}(n: str) -> int {{")
+        for name, *_rest in BUILTIN_SPECS:
+            if name in group:
+                lines.append(f'  if str_eq(n, "{name}") == 1 {{')
+                lines.append("    return 1")
+                lines.append("  }")
+        lines.extend(["  return 0", "}", ""])
+    lines.append("# Argument count of a machine builtin; 0 for anything else.")
+    lines.append("fn builtin_arity(n: str) -> int {")
+    for name, _ident, arity, _result, _symbol, _args, _stage0 in BUILTIN_SPECS:
+        if name in KERNEL_ONLY:
+            lines.append(f'  if str_eq(n, "{name}") == 1 {{')
+            lines.append(f"    return {arity}")
+            lines.append("  }")
+    lines.extend(["  return 0", "}", ""])
+    lines.append("# Declared kind of argument i of a machine builtin, \"\" past the end.")
+    lines.append("fn builtin_arg(n: str, i: int) -> str {")
+    for name, _ident, _arity, _result, _symbol, args, _stage0 in BUILTIN_SPECS:
+        if name not in KERNEL_ONLY or not args:
+            continue
+        lines.append(f'  if str_eq(n, "{name}") == 1 {{')
+        for index, allowed in enumerate(args):
+            lines.append(f'    if i == {index} {{ return "{allowed[0]}" }}')
+        lines.append('    return ""')
+        lines.append("  }")
+    lines.extend(['  return ""', "}", ""])
     return "\n".join(lines)
 
 
