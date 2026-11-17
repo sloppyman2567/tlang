@@ -4,6 +4,20 @@ All notable changes to tlang and tcomp are recorded here. The compiler and the
 language share one version, reported by `tcomp --version` and kept in sync by
 `Tests/version_test.py`.
 
+## 1.2.1
+
+### Added
+
+- A project icon (`tlang-icon.svg` and `tlang-icon.png`) and CI/version badges
+  in the README header.
+
+### Changed
+
+- `VERSION` is now the single source of truth for the compiler version. Stage 0
+  reads it in `Bootstrap/__init__.py`; `Tools/gen_version.py` generates the
+  `Runtime/version_gen.tl` constant that `tcomp.tl` imports. A release bump
+  edits one file, and CI checks the generated copy is current.
+
 ## 1.2.0
 
 A big update: tlang now builds freestanding binaries with machine builtins,

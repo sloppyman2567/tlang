@@ -8,7 +8,7 @@
 #   as --64 -mx86-used-note=no -o FILE.o FILE.s
 #   ld -s -z noseparate-code --build-id=none -o FILE FILE.o
 
-let TLANG_VERSION = "1.2.0"
+import "Runtime/version_gen.tl"
 
 # ---------------------------------------------------------------- token kinds
 let TK_EOF = 0

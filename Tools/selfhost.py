@@ -47,7 +47,8 @@ def run(argv, **kwargs):
 
 
 def check_generated():
-    for script in ("gen_runtime.py", "gen_kinds.py", "gen_builtins.py"):
+    for script in ("gen_runtime.py", "gen_kinds.py", "gen_builtins.py",
+                   "gen_version.py"):
         run([sys.executable, os.path.join(ROOT, "Tools", script), "--check"])
 
 

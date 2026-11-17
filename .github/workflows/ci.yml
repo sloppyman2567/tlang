@@ -19,6 +19,7 @@ jobs:
           python3 Tools/gen_runtime.py --check
           python3 Tools/gen_kinds.py --check
           python3 Tools/gen_builtins.py --check
+          python3 Tools/gen_version.py --check
       - name: Builtin and runtime contracts
         run: |
           python3 Tests/builtins_test.py

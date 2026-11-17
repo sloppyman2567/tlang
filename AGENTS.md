@@ -8,9 +8,11 @@ architecture, test list and known limitations.
 - tlang is self-hosting. A language or compiler change must land in both
   `Bootstrap/` (stage 0, Python) and `tcomp.tl` (self-hosted), and stage 2 and
   stage 3 must remain byte-identical.
-- The release version is `1.2.0`; `Bootstrap.__version__` and
-  `tcomp.tl`'s `TLANG_VERSION` must agree (`Tests/version_test.py`). A release
-  bumps both and adds a `CHANGELOG.md` entry.
+- The release version lives in `VERSION`. Stage 0 reads it in
+  `Bootstrap/__init__.py`; `Tools/gen_version.py` generates the
+  `Runtime/version_gen.tl` constant that `tcomp.tl` imports. A release bumps
+  `VERSION`, regenerates, and adds a `CHANGELOG.md` entry; CI checks that the
+  generated file is current.
 - `Bootstrap/runtime.py`, `Bootstrap/builtin_spec.py` and `Tools/gen_kinds.py`
   are sources of truth. `Runtime/runtime_gen.tl`, `Runtime/kinds_gen.tl`,
   `Runtime/builtins_gen.tl`, `Bootstrap/kindrules_gen.py` and
@@ -49,7 +51,7 @@ architecture, test list and known limitations.
 ## Build and check
 
 ```bash
-python3 Tests/version_test.py    # stage 0 and tcomp.tl report tcomp 1.2.0
+python3 Tests/version_test.py    # stage 0 and tcomp.tl report tcomp 1.2.1
 python3 Tests/run_tests.py       # golden output, exit status, binary size
 python3 Tests/diff_test.py       # optimized and --no-opt builds agree
 python3 Tests/compare_test.py    # stage 0 and self-hosted compiler agree
