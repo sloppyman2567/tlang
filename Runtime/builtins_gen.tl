@@ -316,6 +316,54 @@ fn builtin_kind(n: str) -> int {
   if str_eq(n, "file_mtime") == 1 {
     return 105
   }
+  if str_eq(n, "open_dir") == 1 {
+    return 106
+  }
+  if str_eq(n, "read_dir") == 1 {
+    return 107
+  }
+  if str_eq(n, "close_dir") == 1 {
+    return 108
+  }
+  if str_eq(n, "file_mode") == 1 {
+    return 109
+  }
+  if str_eq(n, "is_dir") == 1 {
+    return 110
+  }
+  if str_eq(n, "is_file") == 1 {
+    return 111
+  }
+  if str_eq(n, "symlink") == 1 {
+    return 112
+  }
+  if str_eq(n, "readlink") == 1 {
+    return 113
+  }
+  if str_eq(n, "chmod") == 1 {
+    return 114
+  }
+  if str_eq(n, "fork") == 1 {
+    return 115
+  }
+  if str_eq(n, "exec") == 1 {
+    return 116
+  }
+  if str_eq(n, "waitpid") == 1 {
+    return 117
+  }
+  if str_eq(n, "pipe") == 1 {
+    return 118
+  }
+  if str_eq(n, "dup2") == 1 {
+    return 119
+  }
+  if str_eq(n, "kill") == 1 {
+    return 120
+  }
+  if str_eq(n, "getppid") == 1 {
+    return 121
+  }
   return 0
 }
 
@@ -405,6 +453,54 @@ fn builtin_hosted(n: str) -> int {
     return 1
   }
   if str_eq(n, "file_mtime") == 1 {
+    return 1
+  }
+  if str_eq(n, "open_dir") == 1 {
+    return 1
+  }
+  if str_eq(n, "read_dir") == 1 {
+    return 1
+  }
+  if str_eq(n, "close_dir") == 1 {
+    return 1
+  }
+  if str_eq(n, "file_mode") == 1 {
+    return 1
+  }
+  if str_eq(n, "is_dir") == 1 {
+    return 1
+  }
+  if str_eq(n, "is_file") == 1 {
+    return 1
+  }
+  if str_eq(n, "symlink") == 1 {
+    return 1
+  }
+  if str_eq(n, "readlink") == 1 {
+    return 1
+  }
+  if str_eq(n, "chmod") == 1 {
+    return 1
+  }
+  if str_eq(n, "fork") == 1 {
+    return 1
+  }
+  if str_eq(n, "exec") == 1 {
+    return 1
+  }
+  if str_eq(n, "waitpid") == 1 {
+    return 1
+  }
+  if str_eq(n, "pipe") == 1 {
+    return 1
+  }
+  if str_eq(n, "dup2") == 1 {
+    return 1
+  }
+  if str_eq(n, "kill") == 1 {
+    return 1
+  }
+  if str_eq(n, "getppid") == 1 {
     return 1
   }
   return 0

@@ -28,6 +28,14 @@ architecture, test list and known limitations.
 - `--freestanding` and the machine builtins also land in both compilers. A
   kernel build emits `call __k_<name>` and takes `print`, `alloc`, `exit` and
   the diagnostics from `Kernel/kruntime.s`; never add a syscall to that path.
+- Hosted Linux builtins that issue syscalls must have their ABI facts checked
+  against the Linux source and UAPI headers, not recalled from memory: syscall
+  numbers against `arch/x86/entry/syscalls/syscall_64.tbl`, `linux_dirent64`
+  against `include/linux/dirent.h`, and `struct stat` offsets against
+  `arch/x86/include/uapi/asm/stat.h`. Local `/usr/include/asm/unistd_64.h` and
+  the installed `asm-generic/` headers are a quick cross-check for numbers and
+  constants (`O_DIRECTORY`, `S_IF*`, `WNOHANG`). Record any fixed limit (buffer
+  sizes, cursor counts, argv cap) in `README.md`.
 - The boot path is `Kernel/mbr.s` (512-byte MBR, 192-sector load window) plus
   `Kernel/boot.s` (identity map, long mode). `Kernel/build.sh` reads
   `IMAGE_SECTORS` from `mbr.s` and fails when the image outgrows that window;
@@ -53,7 +61,7 @@ architecture, test list and known limitations.
 ## Build and check
 
 ```bash
-python3 Tests/version_test.py    # stage 0 and tcomp.tl report tcomp 1.2.2
+python3 Tests/version_test.py    # stage 0 and tcomp.tl report tcomp 1.3.0
 python3 Tests/run_tests.py       # golden output, exit status, binary size
 python3 Tests/diff_test.py       # optimized and --no-opt builds agree
 python3 Tests/compare_test.py    # stage 0 and self-hosted compiler agree
@@ -65,6 +73,8 @@ python3 Tests/kernel_test.py     # boots the desktop, clicks and types at it (77
 python3 Tests/sourcemap_test.py  # imported-file diagnostics
 python3 Tests/env_test.py        # environment lookup in both compilers
 python3 Tests/bounds_test.py     # checked indexing and runtime guards
+python3 Tests/portability_test.py     # common Linux builtins in both compilers
+python3 Tests/linux_extra_test.py     # directory, metadata and process builtins
 Tools/selfhost.sh --verify       # stages 2 and 3 must be byte-identical
 ```
 
@@ -95,4 +105,10 @@ All three scripts accept `--check`; `Tools/selfhost.sh` fails on stale output.
 
 Add cases under `Tests/Cases/` as `NAME.tl`, optionally with `NAME.in`,
 `NAME.out` and `NAME.code`. `Tests/run_tests.py --update` rewrites golden
-files, so inspect the diff before trusting it.
+files, so inspect the diff before trusting it. New Linux builtins need more
+than a one-call golden case: exercise them with real-world scenarios in both
+compilers — large and long-named directories, interleaved cursors, fd reuse
+after `close_dir`, fork/pipe/waitpid with both normal and signal exits, and
+`exec` with a dirty stack and varied argv lengths. An independent review pass
+over the assembly (caller-saved registers, syscall return values including
+zero, and cursor/buffer bounds) is worth running before release.

@@ -2873,6 +2873,36 @@ fn parse_construct(name: str) {
   GTYPE = name
 }
 
+# Count the arguments of a call whose opening parenthesis was just consumed.
+# This scans tokens without parsing them, so it emits no code.  It is used by
+# the generated builtin dispatch to report the same "got N" arity diagnostic as
+# stage 0, including the number the caller actually wrote.
+fn call_arg_count() -> int {
+  if cur_is(TK_RPAREN) == 1 { return 0 }
+  let depth = 0
+  let n = 1
+  let i = TI
+  while TK[i] != TK_EOF {
+    let t = TK[i]
+    if t == TK_LPAREN || t == TK_LBRACKET || t == TK_LBRACE {
+      depth = depth + 1
+    } else {
+      if t == TK_RPAREN {
+        if depth == 0 { return n }
+        depth = depth - 1
+      } else {
+        if t == TK_RBRACKET || t == TK_RBRACE {
+          depth = depth - 1
+        } else {
+          if t == TK_COMMA && depth == 0 { n = n + 1 }
+        }
+      }
+    }
+    i = i + 1
+  }
+  return n
+}
+
 fn one_arg(name: str) {
   adv()
   if cur_is(TK_RPAREN) == 1 {
@@ -5216,6 +5246,19 @@ fn emit_bss() {
     el("  .zero 8")
     el("__t_argv_val:")
     el("  .zero 8")
+    # read_dir's four buffered directory cursors.  BSS costs no file bytes, but
+    # emitting it only for programs that iterate directories keeps the symbol
+    # set of a program that never opens one unchanged.
+    if U_GEN_READ_DIR == 1 || U_GEN_CLOSE_DIR == 1 {
+      el("__t_rd_fd:")
+      el("  .zero 32")
+      el("__t_rd_pos:")
+      el("  .zero 32")
+      el("__t_rd_len:")
+      el("  .zero 32")
+      el("__t_rd_buf:")
+      el("  .zero 16384")
+    }
   }
   el(".section .note.GNU-stack,\"\",@progbits")
 }

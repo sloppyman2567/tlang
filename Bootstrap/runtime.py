@@ -1819,6 +1819,390 @@ RUNTIME = {
   ret""",
         ["newbuf"],
     ),
+    # Directory traversal.  getdents64 returns a block of whole records; the
+    # fd's byte offset is not a reliable way to unread the ones we do not
+    # return (directory offsets are opaque cookies on some filesystems), so
+    # read_dir keeps a buffered cursor per fd in BSS.  Four slots let two
+    # directories be walked in parallel.  "." and ".." are skipped, and each
+    # name is copied into a fresh string so earlier names stay valid.
+    "open_dir": (
+        """__t_open_dir:
+  mov esi, 65536
+  xor edx, edx
+  mov eax, 2
+  syscall
+  ret""",
+        [],
+    ),
+    "read_dir": (
+        """__t_read_dir:
+  push rbx
+  push r12
+  push r13
+  push r14
+  mov r12d, edi
+  xor rax, rax
+.Lt_rd_scan:
+  cmp rax, 4
+  jge .Lt_rd_free
+  lea rdx, [rip + __t_rd_fd]
+  mov rdx, [rdx + rax*8]
+  cmp rdx, r12
+  je .Lt_rd_slot
+  inc rax
+  jmp .Lt_rd_scan
+.Lt_rd_free:
+  xor rax, rax
+.Lt_rd_freescan:
+  cmp rax, 4
+  jge .Lt_rd_empty
+  lea rdx, [rip + __t_rd_fd]
+  mov rdx, [rdx + rax*8]
+  test rdx, rdx
+  je .Lt_rd_claim
+  cmp rdx, -1
+  je .Lt_rd_claim
+  inc rax
+  jmp .Lt_rd_freescan
+.Lt_rd_claim:
+  lea rdx, [rip + __t_rd_fd]
+  mov [rdx + rax*8], r12
+  lea rdx, [rip + __t_rd_len]
+  mov qword ptr [rdx + rax*8], 0
+  lea rdx, [rip + __t_rd_pos]
+  mov qword ptr [rdx + rax*8], 0
+.Lt_rd_slot:
+  mov r14, rax
+  lea rdx, [rip + __t_rd_pos]
+  mov rcx, [rdx + r14*8]
+  lea rdx, [rip + __t_rd_len]
+  mov rbx, [rdx + r14*8]
+  cmp rcx, rbx
+  jb .Lt_rd_rec
+  mov rax, r14
+  shl rax, 12
+  lea rsi, [rip + __t_rd_buf]
+  add rsi, rax
+  mov rdi, r12
+  mov edx, 4096
+  mov eax, 217
+  syscall
+  test rax, rax
+  jle .Lt_rd_empty
+  lea rdx, [rip + __t_rd_len]
+  mov [rdx + r14*8], rax
+  lea rdx, [rip + __t_rd_pos]
+  mov qword ptr [rdx + r14*8], 0
+  xor rcx, rcx
+  mov rbx, rax
+.Lt_rd_rec:
+  mov rax, r14
+  shl rax, 12
+  lea rdx, [rip + __t_rd_buf]
+  add rdx, rax
+  add rdx, rcx
+  movzx r8d, word ptr [rdx + 16]
+  cmp r8d, 19
+  jb .Lt_rd_empty
+  lea rax, [rcx + r8]
+  cmp rax, rbx
+  ja .Lt_rd_empty
+  add rcx, r8
+  lea rax, [rip + __t_rd_pos]
+  mov [rax + r14*8], rcx
+  lea r13, [rdx + 19]
+  cmp byte ptr [r13], 46
+  jne .Lt_rd_found
+  cmp byte ptr [r13 + 1], 0
+  je .Lt_rd_rec
+  cmp byte ptr [r13 + 1], 46
+  jne .Lt_rd_found
+  cmp byte ptr [r13 + 2], 0
+  je .Lt_rd_rec
+.Lt_rd_found:
+  mov eax, r8d
+  sub eax, 19
+  lea rdx, [r13 + rax]
+  mov r9, r13
+.Lt_rd_len:
+  cmp r9, rdx
+  jae .Lt_rd_len_done
+  cmp byte ptr [r9], 0
+  je .Lt_rd_len_done
+  inc r9
+  jmp .Lt_rd_len
+.Lt_rd_len_done:
+  sub r9, r13
+  mov r10, r9
+  lea rdi, [r10 + 1]
+  call __t_newbuf
+  mov rbx, rax
+  mov rdi, rax
+  mov rsi, r13
+  mov rcx, r10
+  rep movsb
+  mov rax, rbx
+  pop r14
+  pop r13
+  pop r12
+  pop rbx
+  ret
+.Lt_rd_empty:
+  lea rax, [rip + __t_empty]
+  pop r14
+  pop r13
+  pop r12
+  pop rbx
+  ret""",
+        ["newbuf"],
+    ),
+    "close_dir": (
+        """__t_close_dir:
+  mov rsi, rdi
+  xor rax, rax
+.Lt_cd_scan:
+  cmp rax, 4
+  jge .Lt_cd_close
+  lea rdx, [rip + __t_rd_fd]
+  cmp qword ptr [rdx + rax*8], rsi
+  jne .Lt_cd_next
+  mov qword ptr [rdx + rax*8], 0
+.Lt_cd_next:
+  inc rax
+  jmp .Lt_cd_scan
+.Lt_cd_close:
+  mov rdi, rsi
+  mov eax, 3
+  syscall
+  ret""",
+        [],
+    ),
+    # st_mode is at offset 24 in x86-64 struct stat; stat's buffer starts at
+    # rsp + 8.  is_dir/is_file repeat the syscall rather than call file_mode:
+    # the generated runtime emission would otherwise need a cross-builtin
+    # dependency, and these three stay independent leaf helpers.
+    "file_mode": (
+        """__t_file_mode:
+  sub rsp, 160
+  mov [rsp + 144], rdi
+  mov rdi, -100
+  mov rsi, [rsp + 144]
+  lea rdx, [rsp + 8]
+  xor r10d, r10d
+  mov eax, 262
+  syscall
+  test rax, rax
+  js .Lt_fmode_fail
+  mov eax, dword ptr [rsp + 32]
+  add rsp, 160
+  ret
+.Lt_fmode_fail:
+  mov rax, -1
+  add rsp, 160
+  ret""",
+        [],
+    ),
+    "is_dir": (
+        """__t_is_dir:
+  sub rsp, 160
+  mov [rsp + 144], rdi
+  mov rdi, -100
+  mov rsi, [rsp + 144]
+  lea rdx, [rsp + 8]
+  xor r10d, r10d
+  mov eax, 262
+  syscall
+  test rax, rax
+  js .Lt_isdir_zero
+  mov eax, dword ptr [rsp + 32]
+  and eax, 61440
+  cmp eax, 16384
+  sete al
+  movzx eax, al
+  add rsp, 160
+  ret
+.Lt_isdir_zero:
+  xor eax, eax
+  add rsp, 160
+  ret""",
+        [],
+    ),
+    "is_file": (
+        """__t_is_file:
+  sub rsp, 160
+  mov [rsp + 144], rdi
+  mov rdi, -100
+  mov rsi, [rsp + 144]
+  lea rdx, [rsp + 8]
+  xor r10d, r10d
+  mov eax, 262
+  syscall
+  test rax, rax
+  js .Lt_isfile_zero
+  mov eax, dword ptr [rsp + 32]
+  and eax, 61440
+  cmp eax, 32768
+  sete al
+  movzx eax, al
+  add rsp, 160
+  ret
+.Lt_isfile_zero:
+  xor eax, eax
+  add rsp, 160
+  ret""",
+        [],
+    ),
+    "symlink": (
+        """__t_symlink:
+  mov eax, 88
+  syscall
+  ret""",
+        [],
+    ),
+    "readlink": (
+        """__t_readlink:
+  push rbx
+  mov rbx, rdi
+  mov edi, 4096
+  call __t_newbuf
+  mov rdi, rbx
+  mov rsi, rax
+  mov edx, 4096
+  mov eax, 89
+  syscall
+  test rax, rax
+  js .Lt_rlink_fail
+  mov rax, rsi
+  pop rbx
+  ret
+.Lt_rlink_fail:
+  lea rax, [rip + __t_empty]
+  pop rbx
+  ret""",
+        ["newbuf"],
+    ),
+    "chmod": (
+        """__t_chmod:
+  mov eax, 90
+  syscall
+  ret""",
+        [],
+    ),
+    # Process control, all one syscall per helper.  exec marshals at most 128
+    # string pointers on the stack (NULL-terminated argv, empty envp); on
+    # success it never returns.  waitpid returns the raw status: bit 7 is set
+    # for a signal, bits 8..15 hold the exit code.  pipe writes the two fds
+    # into slots 0 and 1 of a caller-supplied array, which must have length>=2.
+    "fork": (
+        """__t_fork:
+  mov eax, 57
+  syscall
+  ret""",
+        [],
+    ),
+    "exec": (
+        """__t_exec:
+  push rbx
+  push r12
+  sub rsp, 1040
+  mov rbx, rdi
+  mov r12, rsi
+  test r12, r12
+  jz .Lt_exec_fail
+  mov rcx, [r12 - 8]
+  test rcx, rcx
+  js .Lt_exec_fail
+  cmp rcx, 128
+  jg .Lt_exec_fail
+.Lt_exec_count:
+  xor r8, r8
+.Lt_exec_copy:
+  cmp r8, rcx
+  jge .Lt_exec_done
+  mov rdx, [r12 + r8*8]
+  mov [rsp + r8*8], rdx
+  inc r8
+  jmp .Lt_exec_copy
+.Lt_exec_done:
+  mov qword ptr [rsp + rcx*8], 0
+  lea rdx, [rsp + 1032]
+  mov qword ptr [rdx], 0
+  mov rdi, rbx
+  mov rsi, rsp
+  mov eax, 59
+  syscall
+.Lt_exec_fail:
+  mov rax, -1
+  add rsp, 1040
+  pop r12
+  pop rbx
+  ret""",
+        [],
+    ),
+    "waitpid": (
+        """__t_waitpid:
+  sub rsp, 16
+  mov rdx, rsi
+  mov rsi, rsp
+  mov eax, 61
+  syscall
+  test rax, rax
+  jle .Lt_wp_done
+  mov rax, [rsp]
+.Lt_wp_done:
+  add rsp, 16
+  ret""",
+        [],
+    ),
+    "pipe": (
+        """__t_pipe:
+  push rbx
+  mov rbx, rdi
+  sub rsp, 16
+  cmp qword ptr [rbx - 8], 2
+  jl .Lt_pipe_fail
+  mov rdi, rsp
+  mov eax, 22
+  syscall
+  test rax, rax
+  js .Lt_pipe_out
+  mov eax, dword ptr [rsp]
+  mov [rbx], rax
+  mov eax, dword ptr [rsp + 4]
+  mov [rbx + 8], rax
+  xor eax, eax
+.Lt_pipe_out:
+  add rsp, 16
+  pop rbx
+  ret
+.Lt_pipe_fail:
+  mov rax, -22
+  add rsp, 16
+  pop rbx
+  ret""",
+        [],
+    ),
+    "dup2": (
+        """__t_dup2:
+  mov eax, 33
+  syscall
+  ret""",
+        [],
+    ),
+    "kill": (
+        """__t_kill:
+  mov eax, 62
+  syscall
+  ret""",
+        [],
+    ),
+    "getppid": (
+        """__t_getppid:
+  mov eax, 110
+  syscall
+  ret""",
+        [],
+    ),
 }
 
 # Canonical table keyed by the real assembly symbol.
@@ -1894,6 +2278,16 @@ __t_argc_val:
   .zero 8
 __t_argv_val:
   .zero 8
+# read_dir cursors, four open directories at a time: fd (-1 or 0 = free),
+# offset into the block, block length, and 4 KiB of buffered dirents per slot.
+__t_rd_fd:
+  .zero 32
+__t_rd_pos:
+  .zero 32
+__t_rd_len:
+  .zero 32
+__t_rd_buf:
+  .zero 16384
 """ % ARENA_SIZE
 
 DATA_TOKENS = """.data

@@ -4,6 +4,47 @@ All notable changes to tlang and tcomp are recorded here. The compiler and the
 language share one version, reported by `tcomp --version` and kept in sync by
 `Tests/version_test.py`.
 
+## 1.3.0
+
+### Added
+
+- Directory and metadata builtins: `open_dir`, `read_dir`, `close_dir`,
+  `file_mode`, `is_dir`, `is_file`, `symlink`, `readlink` and `chmod`.
+  `read_dir` keeps up to four buffered directory cursors, skips `.` and `..`,
+  and returns each name as a separate string.
+- Process builtins: `fork`, `exec`, `waitpid`, `pipe`, `dup2`, `kill` and
+  `getppid`. `waitpid` returns the raw wait status, and `exec` marshals a
+  string array into `argv` (at most 128 entries; longer arrays fail with `-1`
+  instead of being truncated). Both groups are hosted-only, generated through
+  the shared builtin pipeline, and covered by `Tests/linux_extra_test.py`.
+
+### Changed
+
+- Generated builtin dispatch now uses the shared `types_ok` kind rule, so the
+  self-hosted compiler accepts an untyped array where stage 0 does
+  (`pipe(alloc(2))` used to be rejected by stage 1 alone).
+- Wrong argument counts for generated builtins now produce the same named
+  diagnostic in both compilers (`chmod() takes 2 argument(s), got 1`), instead
+  of a generic token error in the self-hosted one.
+
+### Fixed
+
+- `read_dir` copies each entry to the start of its freshly allocated buffer;
+  an earlier version left the string empty after `newbuf` clobbered `rdi`.
+- `close_dir` releases the `read_dir` cursor, so a reused fd cannot continue
+  reading the previous directory's entries.
+- `exec` NULL-terminates argv at the real argument count, so a dirty stack can
+  no longer make the new program see up to 128 arguments.
+- `waitpid(pid, WNOHANG)` returns `0` when no child is ready instead of reading
+  an uninitialised status slot.
+- A fifth concurrent `read_dir` cursor now returns `""` cleanly instead of
+  reading past the four-slot cursor arrays in BSS.
+
+### Sizes
+
+`tcomp` is 182,842 B (stage 0 builds it at 199,195 B); hello is still 321 B.
+The fixed point holds.
+
 ## 1.2.2
 
 ### Added

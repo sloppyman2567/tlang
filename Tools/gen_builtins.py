@@ -117,7 +117,12 @@ def _flag(name):
 
 def _typecheck(name, index, allowed):
     want = " or ".join(allowed)
-    conds = " && ".join(f'GTYPE != "{kind}"' for kind in allowed)
+    # Use the same kind rule as stage 0: an array of any element type satisfies
+    # "ptr", and "0" satisfies every non-float kind.  Exact string comparison
+    # here rejected `pipe(alloc(2))` in the self-hosted compiler while stage 0
+    # accepted it, because alloc() tracks an untyped array as "arr".
+    conds = " && ".join(
+        f'types_ok("{kind}", GTYPE) == 0' for kind in allowed)
     return [f'    if GTYPE != "" && {conds} {{ '
             f'err(arg_msg("{name}", {index}, "{want}")) }}']
 
@@ -137,20 +142,34 @@ def render_dispatch():
     for name, ident, arity, result, symbol, args, _stage0 in specs:
         lines.append(f"  if kind == {ident} {{")
         if arity == 0:
-            lines.extend(["    adv()", "    expect(TK_RPAREN)"])
+            lines.extend([
+                "    adv()",
+                "    let gen_argc = call_arg_count()",
+                f'    if gen_argc != 0 {{ err("{name}() takes 0 argument(s), got " + gen_argc) }}',
+                "    expect(TK_RPAREN)",
+            ])
         elif arity == 1:
             lines.append("    one_arg(name)")
             lines.extend(_typecheck(name, 1, args[0]))
             lines.append('    el("  mov rdi, rax")')
         elif arity == 2:
-            lines.extend(["    adv()", "    let g0 = tmp()", "    expr()"])
+            lines.extend([
+                "    adv()",
+                "    let gen_argc = call_arg_count()",
+                f'    if gen_argc != 2 {{ err("{name}() takes 2 argument(s), got " + gen_argc) }}',
+                "    let g0 = tmp()", "    expr()",
+            ])
             lines.extend(_typecheck(name, 1, args[0]))
-            lines.extend(["    st(g0)", "    expect(TK_COMMA)",
-                          "    let g1 = tmp()", "    expr()"])
+            lines.extend([
+                "    st(g0)", "    expect(TK_COMMA)",
+                "    let g1 = tmp()", "    expr()",
+            ])
             lines.extend(_typecheck(name, 2, args[1]))
-            lines.extend(["    st(g1)", "    expect(TK_RPAREN)",
-                          '    el("  mov rdi, " + loc(g0))',
-                          '    el("  mov rsi, " + loc(g1))'])
+            lines.extend([
+                "    st(g1)", "    expect(TK_RPAREN)",
+                '    el("  mov rdi, " + loc(g0))',
+                '    el("  mov rsi, " + loc(g1))',
+            ])
         else:
             raise SystemExit(f"{name}: generated dispatch supports at most 2 args")
         lines.append(f'    el("  call {symbol}")')

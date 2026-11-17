@@ -12,10 +12,28 @@ let U_GEN_GETCWD = 0
 let U_GEN_OPEN_FD = 0
 let U_GEN_CLOSE_FD = 0
 let U_GEN_FILE_MTIME = 0
+let U_GEN_OPEN_DIR = 0
+let U_GEN_READ_DIR = 0
+let U_GEN_CLOSE_DIR = 0
+let U_GEN_FILE_MODE = 0
+let U_GEN_IS_DIR = 0
+let U_GEN_IS_FILE = 0
+let U_GEN_SYMLINK = 0
+let U_GEN_READLINK = 0
+let U_GEN_CHMOD = 0
+let U_GEN_FORK = 0
+let U_GEN_EXEC = 0
+let U_GEN_WAITPID = 0
+let U_GEN_PIPE = 0
+let U_GEN_DUP2 = 0
+let U_GEN_KILL = 0
+let U_GEN_GETPPID = 0
 
 fn parse_generated_builtin(name: str, kind: int) -> int {
   if kind == 95 {
     adv()
+    let gen_argc = call_arg_count()
+    if gen_argc != 0 { err("now() takes 0 argument(s), got " + gen_argc) }
     expect(TK_RPAREN)
     el("  call __t_now")
     U_GEN_NOW = 1
@@ -24,7 +42,7 @@ fn parse_generated_builtin(name: str, kind: int) -> int {
   }
   if kind == 96 {
     one_arg(name)
-    if GTYPE != "" && GTYPE != "int" { err(arg_msg("sleep_ns", 1, "int")) }
+    if GTYPE != "" && types_ok("int", GTYPE) == 0 { err(arg_msg("sleep_ns", 1, "int")) }
     el("  mov rdi, rax")
     el("  call __t_sleep_ns")
     U_GEN_SLEEP_NS = 1
@@ -33,6 +51,8 @@ fn parse_generated_builtin(name: str, kind: int) -> int {
   }
   if kind == 97 {
     adv()
+    let gen_argc = call_arg_count()
+    if gen_argc != 0 { err("random_int() takes 0 argument(s), got " + gen_argc) }
     expect(TK_RPAREN)
     el("  call __t_random_int")
     U_GEN_RANDOM_INT = 1
@@ -41,6 +61,8 @@ fn parse_generated_builtin(name: str, kind: int) -> int {
   }
   if kind == 98 {
     adv()
+    let gen_argc = call_arg_count()
+    if gen_argc != 0 { err("getpid() takes 0 argument(s), got " + gen_argc) }
     expect(TK_RPAREN)
     el("  call __t_getpid")
     U_GEN_GETPID = 1
@@ -49,14 +71,16 @@ fn parse_generated_builtin(name: str, kind: int) -> int {
   }
   if kind == 99 {
     adv()
+    let gen_argc = call_arg_count()
+    if gen_argc != 2 { err("mkdir() takes 2 argument(s), got " + gen_argc) }
     let g0 = tmp()
     expr()
-    if GTYPE != "" && GTYPE != "str" { err(arg_msg("mkdir", 1, "str")) }
+    if GTYPE != "" && types_ok("str", GTYPE) == 0 { err(arg_msg("mkdir", 1, "str")) }
     st(g0)
     expect(TK_COMMA)
     let g1 = tmp()
     expr()
-    if GTYPE != "" && GTYPE != "int" { err(arg_msg("mkdir", 2, "int")) }
+    if GTYPE != "" && types_ok("int", GTYPE) == 0 { err(arg_msg("mkdir", 2, "int")) }
     st(g1)
     expect(TK_RPAREN)
     el("  mov rdi, " + loc(g0))
@@ -68,7 +92,7 @@ fn parse_generated_builtin(name: str, kind: int) -> int {
   }
   if kind == 100 {
     one_arg(name)
-    if GTYPE != "" && GTYPE != "str" { err(arg_msg("unlink", 1, "str")) }
+    if GTYPE != "" && types_ok("str", GTYPE) == 0 { err(arg_msg("unlink", 1, "str")) }
     el("  mov rdi, rax")
     el("  call __t_unlink")
     U_GEN_UNLINK = 1
@@ -77,14 +101,16 @@ fn parse_generated_builtin(name: str, kind: int) -> int {
   }
   if kind == 101 {
     adv()
+    let gen_argc = call_arg_count()
+    if gen_argc != 2 { err("rename() takes 2 argument(s), got " + gen_argc) }
     let g0 = tmp()
     expr()
-    if GTYPE != "" && GTYPE != "str" { err(arg_msg("rename", 1, "str")) }
+    if GTYPE != "" && types_ok("str", GTYPE) == 0 { err(arg_msg("rename", 1, "str")) }
     st(g0)
     expect(TK_COMMA)
     let g1 = tmp()
     expr()
-    if GTYPE != "" && GTYPE != "str" { err(arg_msg("rename", 2, "str")) }
+    if GTYPE != "" && types_ok("str", GTYPE) == 0 { err(arg_msg("rename", 2, "str")) }
     st(g1)
     expect(TK_RPAREN)
     el("  mov rdi, " + loc(g0))
@@ -96,6 +122,8 @@ fn parse_generated_builtin(name: str, kind: int) -> int {
   }
   if kind == 102 {
     adv()
+    let gen_argc = call_arg_count()
+    if gen_argc != 0 { err("getcwd() takes 0 argument(s), got " + gen_argc) }
     expect(TK_RPAREN)
     el("  call __t_getcwd")
     U_GEN_GETCWD = 1
@@ -106,14 +134,16 @@ fn parse_generated_builtin(name: str, kind: int) -> int {
   }
   if kind == 103 {
     adv()
+    let gen_argc = call_arg_count()
+    if gen_argc != 2 { err("open_fd() takes 2 argument(s), got " + gen_argc) }
     let g0 = tmp()
     expr()
-    if GTYPE != "" && GTYPE != "str" { err(arg_msg("open_fd", 1, "str")) }
+    if GTYPE != "" && types_ok("str", GTYPE) == 0 { err(arg_msg("open_fd", 1, "str")) }
     st(g0)
     expect(TK_COMMA)
     let g1 = tmp()
     expr()
-    if GTYPE != "" && GTYPE != "int" { err(arg_msg("open_fd", 2, "int")) }
+    if GTYPE != "" && types_ok("int", GTYPE) == 0 { err(arg_msg("open_fd", 2, "int")) }
     st(g1)
     expect(TK_RPAREN)
     el("  mov rdi, " + loc(g0))
@@ -125,7 +155,7 @@ fn parse_generated_builtin(name: str, kind: int) -> int {
   }
   if kind == 104 {
     one_arg(name)
-    if GTYPE != "" && GTYPE != "int" { err(arg_msg("close_fd", 1, "int")) }
+    if GTYPE != "" && types_ok("int", GTYPE) == 0 { err(arg_msg("close_fd", 1, "int")) }
     el("  mov rdi, rax")
     el("  call __t_close_fd")
     U_GEN_CLOSE_FD = 1
@@ -134,10 +164,232 @@ fn parse_generated_builtin(name: str, kind: int) -> int {
   }
   if kind == 105 {
     one_arg(name)
-    if GTYPE != "" && GTYPE != "str" { err(arg_msg("file_mtime", 1, "str")) }
+    if GTYPE != "" && types_ok("str", GTYPE) == 0 { err(arg_msg("file_mtime", 1, "str")) }
     el("  mov rdi, rax")
     el("  call __t_file_mtime")
     U_GEN_FILE_MTIME = 1
+    GTYPE = "int"
+    return 1
+  }
+  if kind == 106 {
+    one_arg(name)
+    if GTYPE != "" && types_ok("str", GTYPE) == 0 { err(arg_msg("open_dir", 1, "str")) }
+    el("  mov rdi, rax")
+    el("  call __t_open_dir")
+    U_GEN_OPEN_DIR = 1
+    GTYPE = "int"
+    return 1
+  }
+  if kind == 107 {
+    one_arg(name)
+    if GTYPE != "" && types_ok("int", GTYPE) == 0 { err(arg_msg("read_dir", 1, "int")) }
+    el("  mov rdi, rax")
+    el("  call __t_read_dir")
+    U_GEN_READ_DIR = 1
+    U_NEWBUF = 1
+    U_ALLOC = 1
+    GTYPE = "str"
+    return 1
+  }
+  if kind == 108 {
+    one_arg(name)
+    if GTYPE != "" && types_ok("int", GTYPE) == 0 { err(arg_msg("close_dir", 1, "int")) }
+    el("  mov rdi, rax")
+    el("  call __t_close_dir")
+    U_GEN_CLOSE_DIR = 1
+    GTYPE = "int"
+    return 1
+  }
+  if kind == 109 {
+    one_arg(name)
+    if GTYPE != "" && types_ok("str", GTYPE) == 0 { err(arg_msg("file_mode", 1, "str")) }
+    el("  mov rdi, rax")
+    el("  call __t_file_mode")
+    U_GEN_FILE_MODE = 1
+    GTYPE = "int"
+    return 1
+  }
+  if kind == 110 {
+    one_arg(name)
+    if GTYPE != "" && types_ok("str", GTYPE) == 0 { err(arg_msg("is_dir", 1, "str")) }
+    el("  mov rdi, rax")
+    el("  call __t_is_dir")
+    U_GEN_IS_DIR = 1
+    GTYPE = "int"
+    return 1
+  }
+  if kind == 111 {
+    one_arg(name)
+    if GTYPE != "" && types_ok("str", GTYPE) == 0 { err(arg_msg("is_file", 1, "str")) }
+    el("  mov rdi, rax")
+    el("  call __t_is_file")
+    U_GEN_IS_FILE = 1
+    GTYPE = "int"
+    return 1
+  }
+  if kind == 112 {
+    adv()
+    let gen_argc = call_arg_count()
+    if gen_argc != 2 { err("symlink() takes 2 argument(s), got " + gen_argc) }
+    let g0 = tmp()
+    expr()
+    if GTYPE != "" && types_ok("str", GTYPE) == 0 { err(arg_msg("symlink", 1, "str")) }
+    st(g0)
+    expect(TK_COMMA)
+    let g1 = tmp()
+    expr()
+    if GTYPE != "" && types_ok("str", GTYPE) == 0 { err(arg_msg("symlink", 2, "str")) }
+    st(g1)
+    expect(TK_RPAREN)
+    el("  mov rdi, " + loc(g0))
+    el("  mov rsi, " + loc(g1))
+    el("  call __t_symlink")
+    U_GEN_SYMLINK = 1
+    GTYPE = "int"
+    return 1
+  }
+  if kind == 113 {
+    one_arg(name)
+    if GTYPE != "" && types_ok("str", GTYPE) == 0 { err(arg_msg("readlink", 1, "str")) }
+    el("  mov rdi, rax")
+    el("  call __t_readlink")
+    U_GEN_READLINK = 1
+    U_NEWBUF = 1
+    U_ALLOC = 1
+    GTYPE = "str"
+    return 1
+  }
+  if kind == 114 {
+    adv()
+    let gen_argc = call_arg_count()
+    if gen_argc != 2 { err("chmod() takes 2 argument(s), got " + gen_argc) }
+    let g0 = tmp()
+    expr()
+    if GTYPE != "" && types_ok("str", GTYPE) == 0 { err(arg_msg("chmod", 1, "str")) }
+    st(g0)
+    expect(TK_COMMA)
+    let g1 = tmp()
+    expr()
+    if GTYPE != "" && types_ok("int", GTYPE) == 0 { err(arg_msg("chmod", 2, "int")) }
+    st(g1)
+    expect(TK_RPAREN)
+    el("  mov rdi, " + loc(g0))
+    el("  mov rsi, " + loc(g1))
+    el("  call __t_chmod")
+    U_GEN_CHMOD = 1
+    GTYPE = "int"
+    return 1
+  }
+  if kind == 115 {
+    adv()
+    let gen_argc = call_arg_count()
+    if gen_argc != 0 { err("fork() takes 0 argument(s), got " + gen_argc) }
+    expect(TK_RPAREN)
+    el("  call __t_fork")
+    U_GEN_FORK = 1
+    GTYPE = "int"
+    return 1
+  }
+  if kind == 116 {
+    adv()
+    let gen_argc = call_arg_count()
+    if gen_argc != 2 { err("exec() takes 2 argument(s), got " + gen_argc) }
+    let g0 = tmp()
+    expr()
+    if GTYPE != "" && types_ok("str", GTYPE) == 0 { err(arg_msg("exec", 1, "str")) }
+    st(g0)
+    expect(TK_COMMA)
+    let g1 = tmp()
+    expr()
+    if GTYPE != "" && types_ok("ptr", GTYPE) == 0 { err(arg_msg("exec", 2, "ptr")) }
+    st(g1)
+    expect(TK_RPAREN)
+    el("  mov rdi, " + loc(g0))
+    el("  mov rsi, " + loc(g1))
+    el("  call __t_exec")
+    U_GEN_EXEC = 1
+    GTYPE = "int"
+    return 1
+  }
+  if kind == 117 {
+    adv()
+    let gen_argc = call_arg_count()
+    if gen_argc != 2 { err("waitpid() takes 2 argument(s), got " + gen_argc) }
+    let g0 = tmp()
+    expr()
+    if GTYPE != "" && types_ok("int", GTYPE) == 0 { err(arg_msg("waitpid", 1, "int")) }
+    st(g0)
+    expect(TK_COMMA)
+    let g1 = tmp()
+    expr()
+    if GTYPE != "" && types_ok("int", GTYPE) == 0 { err(arg_msg("waitpid", 2, "int")) }
+    st(g1)
+    expect(TK_RPAREN)
+    el("  mov rdi, " + loc(g0))
+    el("  mov rsi, " + loc(g1))
+    el("  call __t_waitpid")
+    U_GEN_WAITPID = 1
+    GTYPE = "int"
+    return 1
+  }
+  if kind == 118 {
+    one_arg(name)
+    if GTYPE != "" && types_ok("ptr", GTYPE) == 0 { err(arg_msg("pipe", 1, "ptr")) }
+    el("  mov rdi, rax")
+    el("  call __t_pipe")
+    U_GEN_PIPE = 1
+    GTYPE = "int"
+    return 1
+  }
+  if kind == 119 {
+    adv()
+    let gen_argc = call_arg_count()
+    if gen_argc != 2 { err("dup2() takes 2 argument(s), got " + gen_argc) }
+    let g0 = tmp()
+    expr()
+    if GTYPE != "" && types_ok("int", GTYPE) == 0 { err(arg_msg("dup2", 1, "int")) }
+    st(g0)
+    expect(TK_COMMA)
+    let g1 = tmp()
+    expr()
+    if GTYPE != "" && types_ok("int", GTYPE) == 0 { err(arg_msg("dup2", 2, "int")) }
+    st(g1)
+    expect(TK_RPAREN)
+    el("  mov rdi, " + loc(g0))
+    el("  mov rsi, " + loc(g1))
+    el("  call __t_dup2")
+    U_GEN_DUP2 = 1
+    GTYPE = "int"
+    return 1
+  }
+  if kind == 120 {
+    adv()
+    let gen_argc = call_arg_count()
+    if gen_argc != 2 { err("kill() takes 2 argument(s), got " + gen_argc) }
+    let g0 = tmp()
+    expr()
+    if GTYPE != "" && types_ok("int", GTYPE) == 0 { err(arg_msg("kill", 1, "int")) }
+    st(g0)
+    expect(TK_COMMA)
+    let g1 = tmp()
+    expr()
+    if GTYPE != "" && types_ok("int", GTYPE) == 0 { err(arg_msg("kill", 2, "int")) }
+    st(g1)
+    expect(TK_RPAREN)
+    el("  mov rdi, " + loc(g0))
+    el("  mov rsi, " + loc(g1))
+    el("  call __t_kill")
+    U_GEN_KILL = 1
+    GTYPE = "int"
+    return 1
+  }
+  if kind == 121 {
+    adv()
+    let gen_argc = call_arg_count()
+    if gen_argc != 0 { err("getppid() takes 0 argument(s), got " + gen_argc) }
+    expect(TK_RPAREN)
+    el("  call __t_getppid")
+    U_GEN_GETPPID = 1
     GTYPE = "int"
     return 1
   }
@@ -156,4 +408,20 @@ fn emit_generated_runtime() {
   if U_GEN_OPEN_FD == 1 { rt_emit_open_fd() }
   if U_GEN_CLOSE_FD == 1 { rt_emit_close_fd() }
   if U_GEN_FILE_MTIME == 1 { rt_emit_file_mtime() }
+  if U_GEN_OPEN_DIR == 1 { rt_emit_open_dir() }
+  if U_GEN_READ_DIR == 1 { rt_emit_read_dir() }
+  if U_GEN_CLOSE_DIR == 1 { rt_emit_close_dir() }
+  if U_GEN_FILE_MODE == 1 { rt_emit_file_mode() }
+  if U_GEN_IS_DIR == 1 { rt_emit_is_dir() }
+  if U_GEN_IS_FILE == 1 { rt_emit_is_file() }
+  if U_GEN_SYMLINK == 1 { rt_emit_symlink() }
+  if U_GEN_READLINK == 1 { rt_emit_readlink() }
+  if U_GEN_CHMOD == 1 { rt_emit_chmod() }
+  if U_GEN_FORK == 1 { rt_emit_fork() }
+  if U_GEN_EXEC == 1 { rt_emit_exec() }
+  if U_GEN_WAITPID == 1 { rt_emit_waitpid() }
+  if U_GEN_PIPE == 1 { rt_emit_pipe() }
+  if U_GEN_DUP2 == 1 { rt_emit_dup2() }
+  if U_GEN_KILL == 1 { rt_emit_kill() }
+  if U_GEN_GETPPID == 1 { rt_emit_getppid() }
 }

@@ -103,15 +103,20 @@ def build(source, compiler, work, name):
     return exe
 
 
-def check_rejections(compiler, failures, label):
-    for source, name in BAD_ARGS:
+def check_rejections(compiler, failures, label, work):
+    for index, (source, name) in enumerate(BAD_ARGS):
+        # The driver reads source from a path, not from "-"; writing a real
+        # file keeps this a real rejection test rather than an open failure.
+        path = os.path.join(work, f"bad-{label}-{index}.tl")
+        with open(path, "w", encoding="utf-8") as fh:
+            fh.write(source)
         if compiler is None:
-            proc = subprocess.run([sys.executable, TCOMP, "build", "-", "-o",
-                                   os.devnull], input=source, text=True,
-                                  capture_output=True)
+            proc = subprocess.run([sys.executable, TCOMP, "build", path,
+                                   "-o", os.devnull], capture_output=True,
+                                  text=True)
         else:
-            proc = subprocess.run([compiler, "-"], input=source, text=True,
-                                  capture_output=True)
+            proc = subprocess.run([compiler, path], capture_output=True,
+                                  text=True)
         if proc.returncode == 0:
             failures.append(f"{label}: {name}() accepted bad arguments")
 
@@ -146,7 +151,7 @@ def main():
             if (got.returncode, got.stdout) != (0, "1 3 0 1\n"):
                 failures.append(f"{label}: fd {got.returncode} {got.stdout!r}")
 
-            check_rejections(compiler, failures, label)
+            check_rejections(compiler, failures, label, work)
             if not any(f.startswith(label) for f in failures):
                 print(f"  ok   {label}")
     finally:

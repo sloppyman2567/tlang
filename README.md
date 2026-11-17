@@ -3,10 +3,10 @@
 <p align="center">
   <img src="tlang-icon.png" alt="tlang icon" width="112"><br>
   <a href="https://github.com/sloppyman2567/tlang/actions/workflows/ci.yml"><img src="https://github.com/sloppyman2567/tlang/actions/workflows/ci.yml/badge.svg" alt="CI"></a>
-  <img src="https://img.shields.io/badge/version-1.2.2-blue" alt="version 1.2.2">
+  <img src="https://img.shields.io/badge/version-1.3.0-blue" alt="version 1.3.0">
 </p>
 
-Version 1.2.2 — see [CHANGELOG.md](CHANGELOG.md) for release notes.
+Version 1.3.0 — see [CHANGELOG.md](CHANGELOG.md) for release notes.
 
 A small, high-level language that compiles to **very small native Linux binaries**.
 Its compiler, **tcomp**, is written in tlang itself. The same language is used
@@ -42,7 +42,7 @@ Measured on x86-64 Linux with binutils 2.47:
 | **tbox** (four tools: `wc`, `head`, `tail`, `grep`) | **7,106 B** | — |
 | **tjson** (JSON validate, format, query) | 13,510 B | — |
 | **tbf** (Brainfuck interpreter) | 4,605 B | — |
-| tcomp, the whole compiler | 166,639 B | — |
+| tcomp, the whole compiler | 182,842 B | — |
 | *for comparison:* hello world in C, `gcc -Os -s` | 14,472 B | — |
 | *for comparison:* `grep` + `wc` + `head` + `tail` from coreutils | 437 KB | — |
 
@@ -69,7 +69,7 @@ syscalls and `ld` writes a single read/execute segment.
 ## Quick start
 
 ```bash
-./tcomp --version                       # tcomp 1.2.2
+./tcomp --version                       # tcomp 1.3.0
 ./tcomp run Examples/hello.tl           # compile and run
 ./tcomp build Examples/hello.tl         # -> ./hello
 ./tcomp build Examples/hello.tl --asm   # show the generated assembly
@@ -93,12 +93,12 @@ Tools/selfhost.sh --verify     # builds Build/tcomp and proves the fixed point
 
 ```
 stage 1: tcomp.tl -> Build/tcomp0 (via stage 0)
-  Build/tcomp0: 178896 bytes
+  Build/tcomp0: 195541 bytes
 stage 2: tcomp.tl -> Build/tcomp (via stage 1)
-  Build/tcomp: 166639 bytes
+  Build/tcomp: 182606 bytes
 stage 3: tcomp.tl -> Build/tcomp2 (via stage 2)
 stage 4: tcomp.tl -> Build/tcomp3 (via stage 3)
-fixed point: stage 2 and stage 3 are identical (166639 bytes)
+fixed point: stage 2 and stage 3 are identical (182606 bytes)
 ```
 
 `Build/tcomp` emits assembly on stdout:
@@ -496,6 +496,11 @@ in the module headers.
 | `open_fd(path, flags)` | open a file descriptor; Linux flags (`O_WRONLY`=1, `O_CREAT`=64, `O_TRUNC`=512, `O_APPEND`=1024), mode `0755` when created |
 | `close_fd(fd)` | close a descriptor; `0` on success |
 | `file_mtime(path)` | modification time in seconds since the epoch, or `-1` on failure |
+| `open_dir(path)`, `read_dir(fd)`, `close_dir(fd)` | walk a directory: `read_dir` returns one entry name at a time, `""` at the end |
+| `file_mode(path)`, `is_dir(path)`, `is_file(path)` | raw `st_mode`, and the two type tests most callers want |
+| `symlink(target, link)`, `readlink(path)`, `chmod(path, mode)` | links and permissions |
+| `fork()`, `exec(path, argv)`, `waitpid(pid, opts)` | process creation, replacement and reaping; `waitpid` returns the raw wait status |
+| `pipe(fds)`, `dup2(old, new)`, `kill(pid, sig)`, `getppid()` | pipes, descriptor aliasing, signals and parent pid |
 | `sock(path)` | connect a Unix socket; used by the X11 client and the Wayland module |
 | `fd_read(fd, buf, n)`, `fd_write(fd, buf, n)` | binary read/write of `n` bytes, retrying short transfers |
 | `fd_poll(fd, ms)` | wait up to `ms` for socket readability |
@@ -526,6 +531,65 @@ check and no endian shifting, and `memcpy`/`memset` are the usual `rep movsb` /
 helpers are built from. `tcomp build --no-bounds` drops the checks from ordinary
 array and string indexing as well; both compilers accept it, and it is meant
 for measured hot loops, not general programs. The default remains checked.
+
+### Directories and processes
+
+The directory calls continue the descriptor pattern of `open_fd`: `open_dir`
+returns an fd (or `-1`), `read_dir` returns the next name as a string, and
+`close_dir` releases it. `read_dir` skips `.` and `..`, returns `""` at the end
+of the directory, and copies each name, so names from earlier calls stay
+valid. Up to four directories can be walked at once; `close_dir` releases a
+cursor, and `read_dir` on a fifth active directory returns `""`. Reaching the
+end exhausts that cursor, so reopen the directory to start again.
+
+```tlang
+fn main() {
+  let d = open_dir(".")
+  loop {
+    let name = read_dir(d)
+    if name == "" { break }
+    if is_file(name) { print(name + "\n") }
+  }
+  close_dir(d)
+}
+```
+
+`file_mode` returns the raw `st_mode`, so a program can test any file type or
+permission bit. `is_dir` and `is_file` are the two common answers already
+masked for it; all three return `-1` or `0` respectively when the path cannot
+be stat'd. `readlink` returns `""` on failure, and `chmod`/`symlink` return `0`
+on success.
+
+Processes are deliberately thin wrappers over the syscalls. `fork` returns
+`0` in the child and the child pid in the parent. `exec(path, argv)` takes an
+array of strings (at most 128 — a longer array fails with `-1` rather than
+being silently truncated) and does not return on success; the empty
+environment is passed. `waitpid(pid, opts)` returns the **raw wait status**:
+`(status & 127) == 0` means a normal exit, `(status >> 8) & 255` is the exit
+code, and a nonzero low byte means the child was signalled. `pipe(fds)` writes
+the read and write descriptors into slots 0 and 1 of a two-element int array.
+All of these are hosted-only: a freestanding build rejects them with a named
+error, like the other Linux builtins.
+
+```tlang
+fn main() {
+  let fds = alloc(2)
+  pipe(fds)
+  let pid = fork()
+  if pid == 0 {
+    close_fd(fds[0])
+    fd_write(fds[1], "hi", 2)
+    exit(0)
+  }
+  close_fd(fds[1])
+  let buf = newbuf(8)
+  fd_read(fds[0], buf, 8)
+  print(buf + "\n")            # hi
+  waitpid(pid, 0)
+}
+```
+
+`Tests/linux_extra_test.py` runs these programs in both compilers.
 
 ### Kernel builtins
 
@@ -1098,7 +1162,7 @@ output.
 ## Tests
 
 ```bash
-python3 Tests/version_test.py   # stage 0 and tcomp.tl report tcomp 1.2.2
+python3 Tests/version_test.py   # stage 0 and tcomp.tl report tcomp 1.3.0
 python3 Tests/run_tests.py      # golden output + exit status + binary size
 python3 Tests/diff_test.py      # optimizer must not change behaviour
 python3 Tests/programs_test.py  # tbox, against real arguments and real grep
@@ -1111,6 +1175,7 @@ python3 Tests/freestanding_test.py     # kernel image: no syscalls, links, refus
 python3 Tests/machine_builtins_test.py # machine builtins and the kernel runtime stubs
 python3 Tests/env_test.py       # environment lookup in both compilers
 python3 Tests/portability_test.py # common Linux builtins in both compilers
+python3 Tests/linux_extra_test.py # directory, metadata and process builtins
 python3 Tests/kernel_test.py   # boots the desktop, clicks and types at it
 python3 Tests/errors_test.py    # same rejections and messages in both compilers
 python3 Tests/compare_test.py   # stage 0 and self-hosted compiler must agree
