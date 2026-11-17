@@ -6,6 +6,7 @@ __pycache__/
 /Kernel/kernel.elf
 /Kernel/kernel.bin
 /Kernel/kernel.img
+/Kernel/PLAN.md
 /.qemu-run/
 /test.txt
 /test_bifrost.txt
