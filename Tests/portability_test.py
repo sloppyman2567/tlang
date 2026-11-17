@@ -50,6 +50,20 @@ FS_SRC = '''fn main() {
 }
 '''
 
+FD_SRC = '''fn main() {
+  let p = argv(1)
+  let fd = open_fd(p, 1 | 64 | 512)
+  print_int(fd >= 0)
+  print(" ")
+  print_int(fd_write(fd, "xyz", 3))
+  print(" ")
+  print_int(close_fd(fd))
+  print(" ")
+  print_int(file_mtime(p) > 0)
+  print("\\n")
+}
+'''
+
 BAD_ARGS = (
     ('fn main() { now(1) }', 'now'),
     ('fn main() { sleep_ns("x") }', 'sleep_ns'),
@@ -110,6 +124,7 @@ def main():
         for label, compiler in (("stage0", None), ("stage1", stage1)):
             time_exe = build(TIME_SRC, compiler, work, "time-" + label)
             fs_exe = build(FS_SRC, compiler, work, "fs-" + label)
+            fd_exe = build(FD_SRC, compiler, work, "fd-" + label)
 
             got = subprocess.run([time_exe], cwd=work, capture_output=True,
                                  text=True)
@@ -125,6 +140,11 @@ def main():
             if (got.returncode, got.stdout) != (0, "0 1 0 0 0\n"):
                 failures.append(f"{label}: fs {got.returncode} {got.stdout!r}")
             shutil.rmtree(path, ignore_errors=True)
+
+            out = os.path.join(work, "fd-" + label + ".txt")
+            got = subprocess.run([fd_exe, out], capture_output=True, text=True)
+            if (got.returncode, got.stdout) != (0, "1 3 0 1\n"):
+                failures.append(f"{label}: fd {got.returncode} {got.stdout!r}")
 
             check_rejections(compiler, failures, label)
             if not any(f.startswith(label) for f in failures):

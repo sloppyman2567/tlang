@@ -1761,6 +1761,47 @@ RUNTIME = {
   ret""",
         [],
     ),
+    # Descriptor-based file access, for programs ported from C. Flags are the
+    # Linux values (O_RDONLY=0, O_WRONLY=1, O_RDWR=2, O_CREAT=64, O_TRUNC=512,
+    # O_APPEND=1024); mode is 0755 when a create is requested.
+    "open_fd": (
+        """__t_open_fd:
+  mov edx, 493
+  mov eax, 2
+  syscall
+  ret""",
+        [],
+    ),
+    "close_fd": (
+        """__t_close_fd:
+  mov eax, 3
+  syscall
+  ret""",
+        [],
+    ),
+    # st_mtim.tv_sec is at offset 88 in x86-64 struct stat; the buffer starts
+    # at rsp + 8.
+    "file_mtime": (
+        """__t_file_mtime:
+  sub rsp, 160
+  mov [rsp + 144], rdi
+  mov rdi, -100
+  mov rsi, [rsp + 144]
+  lea rdx, [rsp + 8]
+  xor r10d, r10d
+  mov eax, 262
+  syscall
+  test rax, rax
+  js .Lt_fm_fail
+  mov rax, [rsp + 96]
+  add rsp, 160
+  ret
+.Lt_fm_fail:
+  mov eax, -1
+  add rsp, 160
+  ret""",
+        [],
+    ),
     "getcwd": (
         """__t_getcwd:
   mov edi, 4096

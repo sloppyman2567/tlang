@@ -4,14 +4,15 @@ All notable changes to tlang and tcomp are recorded here. The compiler and the
 language share one version, reported by `tcomp --version` and kept in sync by
 `Tests/version_test.py`.
 
-## Unreleased
+## 1.2.2
 
 ### Added
 
 - Common Linux builtins for source portability: `now()` (nanoseconds since the
   epoch), `sleep_ns(n)`, `random_int()`, `getpid()`, `mkdir(path, mode)`,
-  `unlink(path)`, `rename(old, new)` and `getcwd()`. They are hosted-only, work
-  in both compilers, and are covered by `Tests/portability_test.py`.
+  `unlink(path)`, `rename(old, new)`, `getcwd()`, `open_fd(path, flags)`,
+  `close_fd(fd)` and `file_mtime(path)`. They are hosted-only, work in both
+  compilers, and are covered by `Tests/portability_test.py`.
 
 ### Fixed
 
@@ -21,6 +22,18 @@ language share one version, reported by `tcomp --version` and kept in sync by
 - The optimizer no longer folds `INT_MIN / -1` or `INT_MIN % -1` into a
   constant. x86 `idiv` traps on both, so the unoptimized build used to raise
   SIGFPE while the optimized build printed a value. Both builds now trap.
+
+### Changed
+
+- Plain builtins listed in `GENERATED_BUILTINS` now get their `tcomp.tl` dispatch
+  and runtime emission generated from `Bootstrap/builtin_spec.py`. Adding one
+  needs a spec entry, a runtime helper and regeneration, but no hand-written
+  compiler branch; the new Linux builtins are the first users.
+
+### Sizes
+
+`tcomp` is 166,639 B (stage 0 builds it at 178,896 B); hello is still 321 B.
+The fixed point holds.
 
 ## 1.2.1
 

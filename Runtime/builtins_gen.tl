@@ -307,6 +307,15 @@ fn builtin_kind(n: str) -> int {
   if str_eq(n, "getcwd") == 1 {
     return 102
   }
+  if str_eq(n, "open_fd") == 1 {
+    return 103
+  }
+  if str_eq(n, "close_fd") == 1 {
+    return 104
+  }
+  if str_eq(n, "file_mtime") == 1 {
+    return 105
+  }
   return 0
 }
 
@@ -387,6 +396,15 @@ fn builtin_hosted(n: str) -> int {
     return 1
   }
   if str_eq(n, "getcwd") == 1 {
+    return 1
+  }
+  if str_eq(n, "open_fd") == 1 {
+    return 1
+  }
+  if str_eq(n, "close_fd") == 1 {
+    return 1
+  }
+  if str_eq(n, "file_mtime") == 1 {
     return 1
   }
   return 0

@@ -1699,6 +1699,42 @@ fn rt_emit_rename() {
   el("  ret")
 }
 
+fn rt_emit_open_fd() {
+  el("__t_open_fd:")
+  el("  mov edx, 493")
+  el("  mov eax, 2")
+  el("  syscall")
+  el("  ret")
+}
+
+fn rt_emit_close_fd() {
+  el("__t_close_fd:")
+  el("  mov eax, 3")
+  el("  syscall")
+  el("  ret")
+}
+
+fn rt_emit_file_mtime() {
+  el("__t_file_mtime:")
+  el("  sub rsp, 160")
+  el("  mov [rsp + 144], rdi")
+  el("  mov rdi, -100")
+  el("  mov rsi, [rsp + 144]")
+  el("  lea rdx, [rsp + 8]")
+  el("  xor r10d, r10d")
+  el("  mov eax, 262")
+  el("  syscall")
+  el("  test rax, rax")
+  el("  js .Lt_fm_fail")
+  el("  mov rax, [rsp + 96]")
+  el("  add rsp, 160")
+  el("  ret")
+  el(".Lt_fm_fail:")
+  el("  mov eax, -1")
+  el("  add rsp, 160")
+  el("  ret")
+}
+
 fn rt_emit_getcwd() {
   el("__t_getcwd:")
   el("  mov edi, 4096")

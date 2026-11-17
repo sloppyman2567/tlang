@@ -103,6 +103,9 @@ BUILTIN_IDS = {
     'unlink': 100,
     'rename': 101,
     'getcwd': 102,
+    'open_fd': 103,
+    'close_fd': 104,
+    'file_mtime': 105,
 }
 
 BUILTIN_NAMES = {
@@ -208,6 +211,9 @@ BUILTIN_NAMES = {
     100: 'unlink',
     101: 'rename',
     102: 'getcwd',
+    103: 'open_fd',
+    104: 'close_fd',
+    105: 'file_mtime',
 }
 
 BUILTIN_ARGS = {
@@ -309,6 +315,9 @@ BUILTIN_ARGS = {
     'unlink': (('str',),),
     'rename': (('str',),('str',),),
     'getcwd': (),
+    'open_fd': (('str',),('int',),),
+    'close_fd': (('int',),),
+    'file_mtime': (('str',),),
 }
 
 BUILTINS = {
@@ -413,6 +422,9 @@ BUILTINS = {
     'unlink': (1, 'int', '__t_unlink'),
     'rename': (2, 'int', '__t_rename'),
     'getcwd': (0, 'str', '__t_getcwd'),
+    'open_fd': (2, 'int', '__t_open_fd'),
+    'close_fd': (1, 'int', '__t_close_fd'),
+    'file_mtime': (1, 'int', '__t_file_mtime'),
 }
 
 BUILTIN_MODES = {
@@ -477,4 +489,7 @@ BUILTIN_MODES = {
     'unlink': 'hosted',
     'rename': 'hosted',
     'getcwd': 'hosted',
+    'open_fd': 'hosted',
+    'close_fd': 'hosted',
+    'file_mtime': 'hosted',
 }
