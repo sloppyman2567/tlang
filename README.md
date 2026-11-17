@@ -3,10 +3,10 @@
 <p align="center">
   <img src="tlang-icon.png" alt="tlang icon" width="112"><br>
   <a href="https://github.com/sloppyman2567/tlang/actions/workflows/ci.yml"><img src="https://github.com/sloppyman2567/tlang/actions/workflows/ci.yml/badge.svg" alt="CI"></a>
-  <img src="https://img.shields.io/badge/version-1.3.0-blue" alt="version 1.3.0">
+  <img src="https://img.shields.io/badge/version-1.4.0-blue" alt="version 1.4.0">
 </p>
 
-Version 1.3.0 — see [CHANGELOG.md](CHANGELOG.md) for release notes.
+Version 1.4.0 — see [CHANGELOG.md](CHANGELOG.md) for release notes.
 
 A small, high-level language that compiles to **very small native Linux binaries**.
 Its compiler, **tcomp**, is written in tlang itself. The same language is used
@@ -31,29 +31,26 @@ fn main() {
 
 Measured on x86-64 Linux with binutils 2.47:
 
-| Program | Size | `--no-opt` |
-|---|---|---|
-| `fn main() {}` | **256 B** | 256 B |
-| hello world (`print("hello, tlang\n")`) | **321 B** | 325 B |
-| fib (recursion, 10 calls) | 549 B | 624 B |
-| fizzbuzz (20 lines of output, branches) | 665 B | 734 B |
-| primes, first 20 (functions, loops, calls) | 637 B | 753 B |
-| words (stdin, `read_file`, `argv`) | 1,633 B | 1,778 B |
-| **tbox** (four tools: `wc`, `head`, `tail`, `grep`) | **7,106 B** | — |
-| **tjson** (JSON validate, format, query) | 13,510 B | — |
-| **tbf** (Brainfuck interpreter) | 4,605 B | — |
-| tcomp, the whole compiler | 182,842 B | — |
-| *for comparison:* hello world in C, `gcc -Os -s` | 14,472 B | — |
-| *for comparison:* `grep` + `wc` + `head` + `tail` from coreutils | 437 KB | — |
+| Program | Size |
+|---|---|
+| `fn main() {}` | **300 B** |
+| hello world (`print("hello, tlang\n")`) | **363 B** |
+| fib (recursion, 10 calls) | 582 B |
+| fizzbuzz (20 lines of output, branches) | 629 B |
+| primes, first 20 (functions, loops, calls) | 642 B |
+| words (stdin, `read_file`, `argv`) | 1,572 B |
+| **tbox** (four tools: `wc`, `head`, `tail`, `grep`) | **6,767 B** |
+| **tjson** (JSON validate, format, query) | 13,385 B |
+| **tbf** (Brainfuck interpreter) | 4,464 B |
+| tcomp, the whole compiler | 203,027 B |
+| *for comparison:* hello world in C, `gcc -Os -s` | 14,472 B |
+| *for comparison:* `grep` + `wc` + `head` + `tail` from coreutils | 437 KB |
 
-Sizes include the default bounds checks. Timings are wall-clock
-`tcomp build tcomp.tl --asm` on a development machine (code generation only,
-without assembling or linking); the timing figures below predate those checks.
+Sizes include the default bounds checks and come from the single self-hosted
+compiler; there is no separate optimizing front end to compare against.
 
-Hello world is **45× smaller than the C equivalent**, and an empty `main` is
-**256 B** — 232 of which are the ELF header and three program headers. On a
-file this small the optimizer only moves a few bytes; its 6–16% shows up in
-loop bodies, and in run time.
+Hello world is **40× smaller than the C equivalent**, and an empty `main` is
+**300 B** — most of which is the ELF header and program headers.
 
 No libc, no CRT, no dynamic loader, no relocations — `_start` issues its own
 syscalls and `ld` writes a single read/execute segment.
@@ -69,36 +66,34 @@ syscalls and `ld` writes a single read/execute segment.
 ## Quick start
 
 ```bash
-./tcomp --version                       # tcomp 1.3.0
+./tcomp --version                       # tcomp 1.4.0
 ./tcomp run Examples/hello.tl           # compile and run
 ./tcomp build Examples/hello.tl         # -> ./hello
 ./tcomp build Examples/hello.tl --asm   # show the generated assembly
-./tcomp build Examples/hello.tl --ir    # show the optimized three-address IR
-./tcomp build Examples/hello.tl --no-opt      # skip IR optimization
 ./tcomp build game.tl --no-bounds             # omit index checks (emulator loops)
 ./tcomp build Examples/hello.tl --keep-sections   # keep ELF section headers
 ./Kernel/build.sh                       # freestanding kernel: kernel.elf, .bin, .img
 ```
 
-Requirements: Python 3.9+ (for the bootstrap compiler) and binutils (`as`, `ld`).
+Requirements: Python 3.9+ (for the driver and generators) and binutils (`as`, `ld`).
 The assembler flag `-mx86-used-note=no` needs GNU binutils 2.36 or newer.
 
 ### Self-hosted compiler
 
-`tcomp.tl` is the compiler, written in tlang. Build it with the bootstrap compiler:
+`tcomp.tl` is the compiler, written in tlang. Rebuild it from the checked-in seed:
 
 ```bash
 Tools/selfhost.sh --verify     # builds Build/tcomp and proves the fixed point
 ```
 
 ```
-stage 1: tcomp.tl -> Build/tcomp0 (via stage 0)
-  Build/tcomp0: 195541 bytes
-stage 2: tcomp.tl -> Build/tcomp (via stage 1)
-  Build/tcomp: 182606 bytes
+stage 1: checked-in seed compiler (Tools/tcomp-seed)
+  seed: 203027 bytes
+stage 2: tcomp.tl -> Build/tcomp (via the seed)
+  Build/tcomp: 203027 bytes
 stage 3: tcomp.tl -> Build/tcomp2 (via stage 2)
 stage 4: tcomp.tl -> Build/tcomp3 (via stage 3)
-fixed point: stage 2 and stage 3 are identical (182606 bytes)
+fixed point: stage 2 and stage 3 are identical (203027 bytes)
 ```
 
 `Build/tcomp` emits assembly on stdout:
@@ -231,7 +226,7 @@ fn repeat(s: str, n: int) -> str {
 returns `0`) becomes the process exit status. A program needs one `fn main()
 { }`, and defining a function, global or struct twice is a compile error.
 
-Calls are checked against the annotations in both compilers: a string passed
+Calls are checked against the annotations: a string passed
 to an `int` parameter, a string returned from an `int` function, or
 `print_int(s)` is a compile error. Unannotated values are unknown and are never
 rejected. `0` is accepted wherever a pointer, array or struct is wanted,
@@ -358,9 +353,18 @@ variable still holding the old array keeps the old contents and length.
 `alloc(n)` starts with `n` zeroed elements, so `append` onto it adds element
 `n`.
 
-Allocations normally last until the process exits. `arena_mark()` returns an
-opaque offset, and `arena_release(mark)` discards every allocation made after
-it. This is useful for per-request or per-frame scratch space:
+Allocations come from a 64 MB arena and are reusable. `free(p)` returns a block
+to a size-class free list, and `realloc(p, n)` shrinks in place or grows by
+allocating, copying and freeing. A fresh `alloc(n)` has exactly `n` slots of
+capacity, as before; a block taken from a free list may have more capacity than
+the new request, so `append` can use that spare room. `len()` reports the
+requested element count either way. Freeing a double or interior pointer is
+undefined, and a pointer outside the arena is reported as `tlang: invalid
+free`.
+
+`arena_mark()` returns an opaque offset, and `arena_release(mark)` discards
+every allocation made after it (free-list entries above the mark go with it).
+This is useful for per-request or per-frame scratch space:
 
 ```tlang
 fn main() {
@@ -372,7 +376,8 @@ fn main() {
 ```
 
 Only release a region when no pointer allocated in it escapes into longer-lived
-state; tlang does not check lifetimes.
+state; tlang does not check lifetimes. Manual `free` is the fine-grained tool,
+`arena_release` the bulk one.
 
 Array annotations (`int[]`, `str[]`, `Pair[]`) work on parameters, return
 types and struct fields, so a helper can take an array and use `len`, `append`
@@ -481,6 +486,7 @@ in the module headers.
 | `str_offset(s, n)` | byte offset `n` into `s`, as a string |
 | `str_diff(a, b)` | byte difference between two strings |
 | `alloc(n)`, `alloc(n, T)` | zeroed heap block of `n` slots |
+| `free(p)`, `realloc(p, n)` | return a block to the heap; resize it in place or by copying |
 | `arena_mark()`, `arena_release(mark)` | save/rewind the bump arena for scoped reuse |
 | `read_file(path)` | whole file as a string (`/dev/stdin` works; `""` on failure) |
 | `write_file(path, data)` | write a text file, truncating it; `1` on success |
@@ -499,6 +505,11 @@ in the module headers.
 | `open_dir(path)`, `read_dir(fd)`, `close_dir(fd)` | walk a directory: `read_dir` returns one entry name at a time, `""` at the end |
 | `file_mode(path)`, `is_dir(path)`, `is_file(path)` | raw `st_mode`, and the two type tests most callers want |
 | `symlink(target, link)`, `readlink(path)`, `chmod(path, mode)` | links and permissions |
+| `chdir(path)`, `rmdir(path)` | change directory, or remove an empty one |
+| `truncate(path, n)`, `ftruncate(fd, n)` | set a file's length |
+| `getuid()`, `geteuid()`, `getgid()`, `getegid()` | process identity |
+| `mmap(n)`, `munmap(p, n)`, `mprotect(p, n, prot)` | anonymous byte mappings, `0` on failure; `prot` uses Linux `PROT_*` |
+| `tcp_connect(ip, port)`, `tcp_listen(port)`, `tcp_accept(fd)` | blocking TCP over numeric IPv4; ports are 1–65535 |
 | `fork()`, `exec(path, argv)`, `waitpid(pid, opts)` | process creation, replacement and reaping; `waitpid` returns the raw wait status |
 | `pipe(fds)`, `dup2(old, new)`, `kill(pid, sig)`, `getppid()` | pipes, descriptor aliasing, signals and parent pid |
 | `sock(path)` | connect a Unix socket; used by the X11 client and the Wayland module |
@@ -518,6 +529,8 @@ in the module headers.
 | `ld8/16/32/64(buf, off)` | unchecked little-endian load from a byte buffer |
 | `st8/16/32/64(buf, off, v)` | unchecked little-endian store into a byte buffer |
 | `memcpy(dst, src, n)`, `memset(dst, v, n)` | bulk byte copy and fill |
+| `memmove(dst, src, n)` | overlap-safe byte copy |
+| `memcmp(a, b, n)` | byte comparison: negative, zero or positive |
 | `exit(n)` | terminate with status `n` |
 
 These bit primitives are aimed at emulator code, which otherwise rewrites the
@@ -529,7 +542,7 @@ The `ld*`/`st*` family addresses a `newbuf` buffer by byte offset with no bounds
 check and no endian shifting, and `memcpy`/`memset` are the usual `rep movsb` /
 `rep stosb` loops. Together they are the primitives an emulator's guest-memory
 helpers are built from. `tcomp build --no-bounds` drops the checks from ordinary
-array and string indexing as well; both compilers accept it, and it is meant
+array and string indexing as well; the compiler accepts it, and it is meant
 for measured hot loops, not general programs. The default remains checked.
 
 ### Directories and processes
@@ -538,9 +551,10 @@ The directory calls continue the descriptor pattern of `open_fd`: `open_dir`
 returns an fd (or `-1`), `read_dir` returns the next name as a string, and
 `close_dir` releases it. `read_dir` skips `.` and `..`, returns `""` at the end
 of the directory, and copies each name, so names from earlier calls stay
-valid. Up to four directories can be walked at once; `close_dir` releases a
-cursor, and `read_dir` on a fifth active directory returns `""`. Reaching the
-end exhausts that cursor, so reopen the directory to start again.
+valid. Up to four directories can be walked at once; closing the fd with either
+`close_dir` or `close_fd` releases its cursor, and `read_dir` on a fifth active
+directory returns `""`. Reaching the end exhausts that cursor, so reopen the
+directory to start again.
 
 ```tlang
 fn main() {
@@ -589,7 +603,7 @@ fn main() {
 }
 ```
 
-`Tests/linux_extra_test.py` runs these programs in both compilers.
+`Tests/linux_extra_test.py` runs these programs.
 
 ### Kernel builtins
 
@@ -707,15 +721,15 @@ without GTK/SDL can still show the screen over VNC
 ## Programs
 
 Five programs, escalating in what they ask of the language. All of them build
-with the self-hosted compiler as well as stage 0.
+with tcomp.
 
 | Program | Size | |
 |---|---|---|
-| `Programs/tbox.tl` | 7,106 B | `wc`, `head`, `tail`, `grep` in one binary |
-| `Programs/tjson.tl` | 13,510 B | JSON validate / pretty-print / query |
-| `Programs/tbf.tl` | 4,605 B | a Brainfuck interpreter — a real bytecode VM |
-| `Programs/tchip8.tl` | 22,849 B | a CHIP-8 interpreter with terminal and X11 displays |
-| `Programs/tgameboy.tl` | 35,151 B | a Game Boy DMG CPU, joypad and background PPU |
+| `Programs/tbox.tl` | 6,767 B | `wc`, `head`, `tail`, `grep` in one binary |
+| `Programs/tjson.tl` | 13,385 B | JSON validate / pretty-print / query |
+| `Programs/tbf.tl` | 4,464 B | a Brainfuck interpreter — a real bytecode VM |
+| `Programs/tchip8.tl` | 18,968 B | a CHIP-8 interpreter with terminal and X11 displays |
+| `Programs/tgameboy.tl` | 30,520 B | a Game Boy DMG CPU, joypad and background PPU |
 
 ### tbox — four tools, one binary
 
@@ -853,17 +867,16 @@ bitmap-exact at 8x8 pixels per cell, the window title is `tchip8`, and
 
 `Tests/chip8_test.py` assembles seven ROMs (drawing, BCD/font, collision, key
 skips, frame mode, the shipped demo) and compares the frame byte-for-byte with
-a Python reference in both compilers. The X11 path is manual because it needs a
+a Python reference. The X11 path is manual because it needs a
 real display; it was checked against the running X server with the demo ROM,
-including the title, close protocol, and a 4,096-pixel capture. Frame mode also caught a compiler
-divergence: stage 0 decoded `\e` to ESC, while the self-hosted compiler emitted
-a literal `e`. `asm_esc` in `tcomp.tl` now emits `\033`, and both agree. The hot loop was tuned by inlining fetch and the timer tick and by
-computing `y`/`n`/`nn` only in the opcodes that use them: **74.5 Mcycles/s** on
-stage 0 (was 67.0) and **130.1 Mcycles/s** self-hosted (was 92.4).
+including the title, close protocol, and a 4,096-pixel capture. Frame mode also caught an
+`\e` escape bug, fixed by making `asm_esc` in `tcomp.tl` emit `\033`. The hot loop was tuned by inlining
+fetch and the timer tick and by computing `y`/`n`/`nn` only in the opcodes that use
+them: **130.1 Mcycles/s** (was 92.4).
 
 Reading ROMs exposed a language gap: `read_file` returns a NUL-terminated
 string, so `len()` stops at the first zero byte of a binary. `file_size(path)`
-(new, in both compilers) asks `lseek` for the real length, and the loader
+(new) asks `lseek` for the real length, and the loader
 indexes that many bytes of the read buffer.
 
 ### tgameboy — a Game Boy core with a background PPU
@@ -907,7 +920,7 @@ static border/checker/GB demo, and `Examples/tgameboy-screen.gb` is the
 deterministic stripe ROM used by the headless frame test. `Tests/gameboy_test.py`
 generates seven ROMs covering ALU flags, loads, calls/stack, CB-prefixed ops,
 interrupts, MBC1 banking and the CPU demo, plus one held-joypad register case
-and a byte-exact 23,184-byte PPU frame; all pass in both compilers.
+and a byte-exact 23,184-byte PPU frame; all pass.
 
 ---
 
@@ -1010,179 +1023,87 @@ allocations are rejected instead of silently using the wrong byte size.
 
 1. **No libc, no CRT.** `_start` calls `main` and issues `exit` itself. Nothing
    is linked in; every runtime facility is hand-written assembly.
-2. **Assembler notes off.** GNU `as` adds a 48-byte `.note.gnu.property` (the
-   x86 ISA/feature bits) and two program headers that point at it. No loader
-   reads either, and `as -mx86-used-note=no` drops both: 160 bytes of headers,
-   and 162 bytes once hello world's alignment is counted (483 B → 321 B). A
-   larger program can lose the gain again to the page boundary in front of
-   `.data`.
-3. **Section headers removed after linking.** The kernel runs a binary from its
-   program headers alone; the 320 bytes of section headers and the 28-byte
-   section-name table are pure weight in a file this size. Dropping them
-   (`Bootstrap/elf.py`, the same trick as `sstrip`) takes hello world from
-   669 B to 321 B.
+2. **Assembler notes off.** `as -mx86-used-note=no` drops the x86 feature note
+   and its two program headers, worth 160 bytes of headers.
+3. **Section headers removed after linking.** `Bootstrap/elf.py` (the same trick
+   as `sstrip`) drops the section headers and string table entirely.
 4. **Conditional runtime.** Each helper declares its dependencies, so a program
-   that never prints ships no I/O code at all; unreferenced data such as the
-   out-of-memory message is not emitted either.
-5. **Dead-function elimination.** Only functions reachable from `main` are emitted.
-6. **IR optimization.** Loop-invariant `len()` hoisting, constant folding,
-   immediate operands, copy coalescing, compare-into-branch fusion and
-   dead-temporary removal (`Bootstrap/optir.py`). Every pass judges a temporary
-   by its straight-line interval, not by a whole-function read count: IR temps
-   are reused from statement to statement, so "read once in the function" is
-   almost never true. That is what lets `cmp`+`setcc`+store+`jz` collapse into
-   one `cmp`+`jcc`. Worth **6–16% of the file** — the bytes barely move on the
-   smallest programs because the file is dominated by fixed ELF overhead, but
-   the loop bodies do — and **1.75×** the run speed on the original passes,
-   **2.09×** on a loop whose body is mostly conditions.
-7. **Slot roundtrip folding.** Instruction selection writes every value into a
-   frame slot, and the next instruction usually reads it back: an argument is
-   stored and then loaded into its ABI register, a call result is stored and
-   then loaded so it can be added. A pass over each function
-   (`Bootstrap/opt.py`) folds a store into its only reader when the slot is
-   dead afterwards. Slots are reused from statement to statement, so it
-   consults block liveness instead of "read once in the function". Worth 8% of
-   taarch64's instruction lines — 59,201 B → **51,387 B**, and **11.8 s →
-   9.8 s** on a 20M-iteration guest loop — and 191,744 B → 167,375 B on the
-   stage-1 build.
-8. **Link flags.** `-s -z noseparate-code --build-id=none`: a do-nothing
-   program is 185 B after the post-link trim, versus 4,616 B with plain `ld`.
-9. **`.bss` for buffers.** The 64 MB string arena is NOBITS — it costs 0 file bytes.
-10. **Direct syscalls.** `write`, `read`, `open`, `close`, `exit` — no wrappers.
-
-The templates in `isa.py` are written for clarity, so a naive expansion of
-`x = x + 1` is three instructions and an unused call result is stored anyway.
-`optir.py` takes that slack back before selection runs:
-
-```
-imm t1, 1              add QWORD PTR [rbp-8], 1
-bin add t1, x, t1  ->  # one instruction, no temporary
-mov x, t1
-```
-
-A comparison used only to branch never becomes a value:
-
-```
-cmp lt t, a, b         mov rax, [a]
-jz t, .Lelse      ->   cmp rax, [b]
-                       jge .Lelse
-
-# and with a constant operand, one comparison against memory:
-cmpk lt t, a, 5        cmp QWORD PTR [rbp-8], 5
-jz t, .Lelse      ->   jge .Lelse
-```
-
-`len()` is the one call worth moving across control flow. A condition like
-`while i < len(s)` re-walks the whole string on every iteration, so a scan
-becomes quadratic — over a 32 KB string that loop took **248 ms**, and **0.2 ms**
-once the call is computed in front of the loop label. `--no-opt` still takes
-both the 248 ms path and the recompute-every-iteration path, and
-`Tests/diff_test.py` checks that the two builds agree. The pass refuses any loop
-that writes the string, calls a function (a global's `len()` could have
-changed) or stores a byte into it — storing `\0` would move the end.
-
-The rest of the passes are deliberately local: a rewrite only fires when the
-surrounding instructions make it provably equivalent, and the slot fold
-consults block liveness before it drops a store. `Tests/diff_test.py` checks
-that compiling every case, every example and 150 generated programs with and
-without optimization produces identical output.
-
-### What it costs
-
-| | |
-|---|---|
-| Compile time, `Examples/fizzbuzz.tl` | 54 ms optimized, 52 ms with `--no-opt` |
-| Compile time, `tcomp.tl` (5,252 lines + 1,974 generated) | 465 ms optimized, 435 ms with `--no-opt` |
-| Run time, 20M-iteration loop + `fib(27)` | 64.1 ms with `--no-opt` → **36.6 ms** |
+   that never prints ships no I/O code at all; unreferenced data is not emitted
+   either.
+5. **Dead-function elimination.** Only functions reachable from the entry are
+   emitted.
+6. **Peephole rewrites.** `tcomp.tl` emits assembly in one pass, then a
+   ten-instruction window folds loads into their consumers, narrows constant
+   loads, and fuses compares into branches ("compare-into-branch").
+7. **Link flags.** `-s -z noseparate-code --build-id=none`.
+8. **`.bss` for buffers.** The 64 MB string arena is NOBITS — it costs 0 file bytes.
+9. **Direct syscalls.** `write`, `read`, `open`, `close`, `exit` — no wrappers.
 
 Removing the section headers is the one change that costs something: a stripped
 binary no longer works with `objdump`, `readelf -S` or `strip`. `--keep-sections`
 keeps them when you need to look inside.
 
----
-
 ## Architecture
 
 ```
-tlang source
-   ↓ lexer      tokens, with newline -> ';' insertion
-   ↓ parser     AST (fmt: file:line:col on every node)
-   ↓ lower      three-address IR with virtual registers
-   ↓ optimize   hoist / fold / coalesce / dead-definition elimination (optir.py)
-   ↓ select     IR op -> instruction template (table-driven)
-   ↓ peephole   local rewrites, slot folding
-   ↓ emit       x86-64 assembly (Intel syntax)
+tlang source (tcomp.tl + imported generated modules)
+   ↓ prescan    top-level names and return annotations
+   ↓ lex / parse  single pass, no AST
+   ↓ emit       x86-64 assembly with peephole rewrites (tcomp.tl)
    ↓ as, ld     native ELF
-   ↓ sstrip     section headers and tail removed                 (elf.py)
+   ↓ sstrip     section headers and tail removed          (Bootstrap/elf.py)
 ```
 
-Code generation never mentions a register from language logic: every IR op is
-expanded by a template in `Bootstrap/isa.py`, with typed operands (`Reg`, `Mem`,
-`Imm`, `RipMem`) formatting themselves. A new operator is one table entry.
+`Tools/tcomp-seed` is a checked-in build of `tcomp` used only to bootstrap: it
+compiles `tcomp.tl` into `Build/tcomp`, which then compiles itself again. The
+fixed point is checked by `Tests/fixedpoint.py` and `Tools/selfhost.sh --verify`:
+stage 2 and stage 3 must be **byte-identical**. That is what proves the language
+can express its own compiler. There is no second, Python implementation of the
+language front end; `Bootstrap/` keeps only the runtime, builtin metadata, ELF
+trimming and the thin `./tcomp` driver.
 
-### Two compilers, one language
+The runtime assembly, builtin metadata, kind-compatibility rule and version are
+defined once in Python: `Bootstrap/runtime.py` is generated into
+`Runtime/runtime_gen.tl`, `Bootstrap/builtin_spec.py` is emitted into the name →
+ID table and dispatch by `Tools/gen_builtins.py`, `Tools/gen_kinds.py` emits the
+kind rules, and `Tools/gen_version.py` generates the version constant. Plain
+builtins listed in `GENERATED_BUILTINS` need only a spec entry, a runtime helper
+and regeneration — no hand-written compiler branch.
 
-| | |
-|---|---|
-| `Bootstrap/` | stage 0: a compiler in Python. Exists only to build stage 1. |
-| `tcomp.tl` | the real compiler, written in tlang, single-pass, emitting assembly directly. |
-
-The fixed point is checked by `Tests/fixedpoint.py`: stage 1 compiles
-`tcomp.tl` into stage 2, stage 2 compiles it into stage 3, and stage 2 and
-stage 3 must be **byte-identical** — that is what proves the language can
-express its own compiler. Both compilers pass the same behavioral suite and
-reject the same programs with the same diagnostic text; only the reported
-column can differ, because stage 0 points at an expression's start and
-the self-hosted compiler at the operator it reached.
-
-The runtime assembly, builtin metadata, kind-compatibility rule and version
-are defined once: `Bootstrap/runtime.py` is generated into
-`Runtime/runtime_gen.tl`, `Bootstrap/builtin_spec.py` is emitted into tables for
-both compilers by `Tools/gen_builtins.py`, `Tools/gen_kinds.py` emits both
-kind-rule implementations, and `VERSION` is turned into the tlang constant by
-`Tools/gen_version.py`. Stage 0 reads `VERSION` directly. Plain builtins listed
-in `GENERATED_BUILTINS` also get their `tcomp.tl` dispatch and runtime emission
-generated from the spec, so adding one needs no hand-written compiler branch.
-Neither compiler keeps a hand-maintained second copy of these tables.
-`Tools/selfhost.py` is the single bootstrap/link/fixed-point verifier used by the
-shell command,
-`Tests/fixedpoint.py` and CI.
-
-The self-hosted compiler is deliberately simpler than stage 0: it emits a fixed
-4 KB frame per function and compiles in a single pass without an AST. A short
-prescan collects top-level names first, so a function may use a struct or global
-declared later in the file. It has no IR, so its rewrites — compare-into-branch, placing up to three plain arguments
-straight into their parameter registers, folding a load into the copy that
-consumes it, weaving a small constant or a memory operand into the operation, and
-narrowing a constant load — run as a peephole over a ten-line window of its
-output.
+The compiler emits a fixed 4 KB frame per function and rewrites a ten-line
+window of its own output: compare-into-branch, arguments straight into parameter
+registers, loads folded into their consumers, constants woven into operations,
+and narrower constant loads. A prescan collects top-level names, globals and
+return annotations first, so functions and globals may be used before their
+declarations. The compiler uses fixed tables (60,000 tokens, 20,000 symbols);
+overflow is a diagnostic, not memory corruption.
 
 ---
 
 ## Tests
 
 ```bash
-python3 Tests/version_test.py   # stage 0 and tcomp.tl report tcomp 1.3.0
+python3 Tests/version_test.py   # the compiler reports tcomp 1.4.0
 python3 Tests/run_tests.py      # golden output + exit status + binary size
-python3 Tests/diff_test.py      # optimizer must not change behaviour
 python3 Tests/programs_test.py  # tbox, against real arguments and real grep
 python3 Tests/c_test.py         # C -> tlang translations, against gcc
 python3 Tests/chip8_test.py     # CHIP-8 frames against a Python reference
 python3 Tests/fixedpoint.py     # self-hosting: stages, byte comparison, suite
-python3 Tests/builtins_test.py  # one generated builtin contract for both compilers
+python3 Tests/builtins_test.py  # generated builtin metadata and dependency flags
 python3 Tests/runtime_test.py   # runtime dependency closure and assembly
 python3 Tests/freestanding_test.py     # kernel image: no syscalls, links, refuses misuse
 python3 Tests/machine_builtins_test.py # machine builtins and the kernel runtime stubs
-python3 Tests/env_test.py       # environment lookup in both compilers
-python3 Tests/portability_test.py # common Linux builtins in both compilers
+python3 Tests/env_test.py       # environment lookup
+python3 Tests/portability_test.py # common Linux builtins
 python3 Tests/linux_extra_test.py # directory, metadata and process builtins
+python3 Tests/linux_more_test.py # filesystem, identity, mmap and TCP builtins
+python3 Tests/linux_stress_test.py # many files, mappings and socket round trips
 python3 Tests/kernel_test.py   # boots the desktop, clicks and types at it
-python3 Tests/errors_test.py    # same rejections and messages in both compilers
-python3 Tests/compare_test.py   # stage 0 and self-hosted compiler must agree
+python3 Tests/errors_test.py    # rejected programs and diagnostic text
 python3 Tests/sourcemap_test.py # imported-file errors name the imported file
 python3 Tests/bounds_test.py    # checked indexing and runtime safety guards
 python3 Tests/io_test.py        # file output and the no-print dependency
-python3 Tests/modules_test.py   # recursive imports through both compilers
+python3 Tests/modules_test.py   # recursive imports
 python3 Tests/wayland_test.py   # Wayland input against a fake compositor
 python3 Tests/floats_test.py    # float arithmetic, casting, math and printing
 python3 Tests/gameboy_test.py   # Game Boy CPU/PPU parity
@@ -1203,36 +1124,22 @@ Cases live in `Tests/Cases/`: `NAME.tl` with optional `NAME.in` (stdin),
 ### Float benchmark
 
 `Benchmarks/float_bench.py` runs a dependent 50-million-iteration recurrence
-through stage 0, the self-hosted compiler, and optimized C. Results on an AMD
-Ryzen 7 5800X3D with GCC 16.2.1:
-
-| Build | Median | Mops/s |
-|---|---:|---:|
-| tlang float, stage 0 | 0.171 s | 586 |
-| tlang float, self-hosted | 0.248 s | 403 |
-| C `double -O2` | 0.069 s | 1,450 |
-| tlang int, stage 0 | 0.055 s | 1,830 |
-| C `uint64_t -O2` | 0.046 s | 2,166 |
-
-The float loop is dependency-bound and scalar; these numbers are not a SIMD or
-transcendental-function benchmark. Inlining and multiply-add fusion made stage 0
-25% faster and self-hosted 13% faster than the pre-optimization versions, but C
-remains about 2.5× faster than stage 0 for this recurrence.
+through tcomp and optimized C. The float loop is dependency-bound and scalar;
+these numbers are not a SIMD or transcendental-function benchmark.
 
 ## Layout
 
 ```
 VERSION               the release version, single source of truth
-tcomp                 CLI: build / run / --asm / --ir / version
+tcomp                 CLI: build / run / --asm / version
 tcomp.tl              the compiler, in tlang
 tlang-icon.svg/.png   project icon (SVG source and 256px PNG)
 CHANGELOG.md          release notes for each version
-Bootstrap/            stage-0 compiler (Python)
-  lexer.py parser.py ast_nodes.py lower.py ir.py optir.py isa.py emit.py
-  opt.py runtime.py elf.py driver.py cli.py errors.py kindrules_gen.py
+Bootstrap/            runtime, metadata and the thin CLI driver (Python)
+  runtime.py elf.py driver.py cli.py errors.py kindrules_gen.py
   builtin_spec.py     builtin metadata source
-  builtins_gen.py     generated stage-0 builtin tables
-Runtime/              generated modules imported by both compilers
+  builtins_gen.py     generated builtin tables and IDs
+Runtime/              generated modules imported by tcomp.tl
   runtime_gen.tl      assembly runtime, generated from Bootstrap/runtime.py
   kinds_gen.tl        kind-compatibility rule, generated by Tools/gen_kinds.py
   builtins_gen.tl     builtin name -> ID mapping for the self-hosted compiler
@@ -1241,32 +1148,30 @@ Runtime/              generated modules imported by both compilers
 Tools/selfhost.sh     thin wrapper around Tools/selfhost.py
 Tools/selfhost.py     shared bootstrap, link and fixed-point verifier
 Tools/gen_runtime.py  generate Runtime/runtime_gen.tl
-Tools/gen_kinds.py    generate the kind rule for both compilers
+Tools/gen_kinds.py    generate the tlang kind rule
 Tools/gen_builtins.py generate builtin tables and plain-builtin dispatch
 Tools/gen_version.py  generate the tlang version constant from VERSION
 Tools/ctolang.py      C -> tlang translator
 Tests/version_test.py tlang/tcomp version contract
 Tests/run_tests.py    golden-output suite
-Tests/diff_test.py    optimized vs unoptimized differential test
 Tests/programs_test.py  behavioural tests for Programs/
 Tests/c_test.py       C -> tlang translation tests, checked against gcc
 Tests/chip8_test.py   CHIP-8 frames against a Python reference
 Tests/fixedpoint.py   self-hosting stages, byte comparison and golden suite
-Tests/builtins_test.py builtin metadata contract across both compilers
+Tests/builtins_test.py builtin metadata and dependency contract
 Tests/runtime_test.py runtime dependency closure and assembly
 Tests/freestanding_test.py freestanding build mode and kernel linker script
 Tests/machine_builtins_test.py machine builtins and kernel runtime stubs
-Tests/env_test.py     environment variable lookup in both compilers
-Tests/portability_test.py  time, entropy and directory builtins in both compilers
+Tests/env_test.py     environment variable lookup
+Tests/portability_test.py  time, entropy and directory builtins
 Tests/kernel_test.py  boots the desktop, clicks and types at it, checks the log
-Tests/errors_test.py  identical rejections and diagnostics in both compilers
-Tests/compare_test.py stage 0 vs self-hosted differential test
+Tests/errors_test.py  rejected programs and diagnostics
 Tests/sourcemap_test.py imported-file diagnostics name the imported file
 Tests/bounds_test.py  checked indexing and runtime safety guards
 Tests/io_test.py      file output and self-hosted dependency checks
-Tests/modules_test.py recursive import behaviour in both compilers
+Tests/modules_test.py recursive import behaviour
 Tests/wayland_test.py twayland keyboard/pointer events against a fake compositor
-Tests/floats_test.py  floating-point behaviour in both compilers
+Tests/floats_test.py  floating-point behaviour
 Tests/gameboy_test.py Game Boy CPU and PPU parity
 Benchmarks/float_bench.py  float, integer and C performance comparison
 Tests/stress_test.py  generated programs, checked against a Python model
@@ -1295,10 +1200,11 @@ Kernel/               freestanding kernel: main.tl, kruntime.s, font8.s, mbr.s,
   (struct fields are fixed compile-time offsets).
 * `alloc` rejects negative or oversized counts, and `slice` rejects ranges
   outside its source string. Out-of-range `argv` returns `""`.
-* Strings and arrays are arena-allocated. Individual blocks are never freed;
-  `arena_mark()`/`arena_release(mark)` can rewind to an earlier allocation
-  point. The 64 MB arena exits with a message when exhausted. Every allocation
-  has a 16-byte header.
+* Strings and arrays are arena-allocated with a 16-byte header (capacity and
+  length). `free` recycles a block through size-class free lists and `realloc`
+  resizes it; `arena_mark()`/`arena_release(mark)` rewind in bulk. A double free
+  or an interior pointer is undefined; `free` only rejects values outside the
+  arena. The 64 MB arena exits with a message when exhausted.
 * `read_file` reads the whole file into the arena rather than streaming, so a
   program that slurps many large files can exhaust it.
 * `read_file` returns a NUL-terminated string, so `len()` stops at the first
@@ -1306,6 +1212,14 @@ Kernel/               freestanding kernel: main.tl, kruntime.s, font8.s, mbr.s,
   (as `tchip8` does for ROMs).
 * `write_file` and `append_file` write NUL-terminated text only; use
   `fd_write` for binary data.
+* `tcp_connect`/`tcp_listen`/`tcp_accept` are blocking stream sockets over a
+  numeric `a.b.c.d` address parsed by the runtime: there is no resolver, IPv6,
+  UDP or TLS. Addresses must be four non-empty decimal octets of at most three
+  digits each, and ports must be 1–65535; out-of-range values return `-1` instead of being truncated, and
+  `tcp_listen` does not set `SO_REUSEADDR`. `mmap` is anonymous and private
+  only — no file-backed mapping or sharing — and takes lengths in bytes, while
+  `munmap`/`mprotect` require page-aligned addresses. `mmap` returns `0` on
+  failure rather than a negative errno.
 * The X11 backend is fixed to display `:0` through `/tmp/.X11-unix/X0`, with a
   hardcoded X keycode map; there is no scaling or window-manager close protocol
   there (Ctrl+C exits the emulator).
@@ -1352,23 +1266,19 @@ Kernel/               freestanding kernel: main.tl, kruntime.s, font8.s, mbr.s,
   global annotations: literals, `str()`/`len()`/`int()`/`float()`, struct
   constructors, and array literals whose elements share one kind. That makes
   `str(f())`, `f().field` and `for x in f()` work without an annotation.
-  Recursive functions and calls to functions declared later stay untyped, and
-  a mixed array literal has no element kind.
-* Stage 0 optimizes at the IR level; the self-hosted compiler emits straight
-  from the parse with no IR, so its output is usually larger (hello: 363 B
-  versus 321 B). A ten-line peephole over its output recovers the comparison
-  tail and the operand push/pop, which is enough to beat stage 0 on branchy code
-  (fizzbuzz: 629 B versus 665 B). Slot folding is stage 0's alone: it exists to
-  undo the slots instruction selection writes, and the self-hosted compiler
-  already places arguments in their registers as it emits them. Both binaries
-  are trimmed the same way after linking.
+  A prescan also records the return annotations of later functions and infers
+  literal returns, so a forward call used in a concat gets its type; recursive
+  functions and calls whose return depends on other calls stay untyped. A mixed
+  array literal has no element kind.
+* The compiler emits straight from the parse with no IR, using a ten-line
+  peephole. Its output is trimmed the same way after linking.
 * Kinds are checked at call sites, returns and builtin arguments, but not
   through arithmetic: adding a struct to an integer is not rejected, struct
   constructor fields are not checked, and unannotated values are trusted.
 * The self-hosted compiler uses fixed tables: 60,000 tokens, 20,000 symbols,
   20,000 string literals, 4,000 functions, 1,000 structs, 256 locals and 512
   frame slots per function, and 500 nested loops. Exceeding a limit is a
-  diagnostic, not memory corruption; stage 0 grows dynamically. Imports are
+  diagnostic, not memory corruption. Imports are
   expanded into a 4 MB source buffer, and a larger expansion is an error.
 * Linux x86-64 only. The freestanding kernel boots under QEMU but is early: a
   1280x1024x32 VBE desktop with six apps and a persistent filesystem, a polled
@@ -1382,15 +1292,13 @@ Kernel/               freestanding kernel: main.tl, kruntime.s, font8.s, mbr.s,
 
 ## Contributing
 
-The compiler is self-hosting, so a language change must land in both
-`Bootstrap/` (stage 0) and `tcomp.tl` (stage 1+), and the fixed point must still
-hold:
+The compiler is self-hosting: the language lives in `tcomp.tl`, and the fixed
+point must still hold. Language changes usually need a matching metadata change
+in `Bootstrap/builtin_spec.py` or `Bootstrap/runtime.py`:
 
 ```bash
 python3 Tests/version_test.py    # the version contract must hold
 python3 Tests/run_tests.py
-python3 Tests/diff_test.py       # optimized and --no-opt builds must agree
-python3 Tests/compare_test.py    # stage 0 and stage 1 must agree
 Tools/selfhost.sh --verify       # stage 2 and stage 3 must be byte-identical
 ```
 

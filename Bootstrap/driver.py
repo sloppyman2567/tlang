@@ -4,13 +4,17 @@ import os
 import re
 import shutil
 import subprocess
+import sys
 import tempfile
 
 from .elf import ElfError, strip_sections
 from .errors import TlangError
-from .isa import compile_module
-from .lower import lower_program
-from .parser import parse
+
+# The compiler lives in tcomp.tl.  Tools/tcomp-seed is the checked-in bootstrap
+# binary: it compiles tcomp.tl so the rest of the toolchain can be rebuilt from
+# source without a second compiler implementation.
+SEED = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+                    "Tools", "tcomp-seed")
 
 # These flags are most of the reason tlang binaries are tiny:
 #   -s                     strip the symbol table
@@ -29,24 +33,49 @@ class BuildError(Exception):
     pass
 
 
+class CompileFailed(TlangError):
+    """The compiler already printed a positioned diagnostic to stderr.
+
+    Subclasses TlangError so callers that inspect compile diagnostics keep
+    working; the CLI catches it first because the message was already printed.
+    """
+
+
 def compile_source(src, filename="<input>", opt=True, freestanding=False,
                    entry="main", bounds=True):
-    """Return (assembly text, module)."""
-    program = parse(src, filename)
-    module = lower_program(program, filename, opt, freestanding, entry, bounds)
-    return compile_module(module), module
+    """Return (assembly text, None) for inline source.
+
+    `opt` is accepted for older callers; the self-hosted compiler has no IR,
+    so optimization is not a separate mode.
+    """
+    workdir = tempfile.mkdtemp(prefix="tlang-src-")
+    try:
+        path = os.path.join(workdir, "input.tl")
+        with open(path, "w", encoding="utf-8") as fh:
+            fh.write(src)
+        asm, module = compile_path(path, freestanding=freestanding,
+                                   entry=entry, bounds=bounds)
+        return asm.replace(path, filename), module
+    finally:
+        shutil.rmtree(workdir, ignore_errors=True)
 
 
 def compile_path(path, opt=True, freestanding=False, entry="main", bounds=True):
-    """Compile a file with imports, reporting errors at their real position."""
-    source = read_source(path)
-    try:
-        program = parse(source.text, path)
-        module = lower_program(program, path, opt, freestanding, entry, bounds)
-    except TlangError as exc:
-        exc.remap(source)
-        raise
-    return compile_module(module), module
+    """Compile a file (and its imports) with the checked-in seed compiler."""
+    argv = [SEED]
+    if freestanding:
+        argv.append("--freestanding")
+    if not bounds:
+        argv.append("--no-bounds")
+    if entry != "main":
+        argv += ["--entry", entry]
+    argv.append(path)
+    proc = subprocess.run(argv, capture_output=True, text=True)
+    if proc.returncode != 0:
+        detail = (proc.stderr or proc.stdout).strip()
+        sys.stderr.write(proc.stderr or proc.stdout)
+        raise CompileFailed(detail)
+    return proc.stdout, None
 
 
 def _tool(name):

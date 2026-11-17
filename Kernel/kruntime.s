@@ -788,6 +788,53 @@ __t_bounds_fail:
   call __k_write
   jmp __k_halt
 
+# ---------------------------------------------------------------- mem ops
+# The hosted runtime generates these; a kernel build has no syscall runtime, so
+# the two pure primitives live here.  memcpy/memset stay hosted-only for now.
+__t_memmove:
+  mov rax, rdi
+  test rdx, rdx
+  je .Lk_mm_done
+  cmp rdi, rsi
+  jbe .Lk_mm_forward
+  mov rcx, rsi
+  add rcx, rdx
+  cmp rdi, rcx
+  jae .Lk_mm_forward
+  lea rsi, [rsi + rdx - 1]
+  lea rdi, [rdi + rdx - 1]
+  mov rcx, rdx
+  std
+  rep movsb
+  cld
+  ret
+.Lk_mm_forward:
+  mov rcx, rdx
+  rep movsb
+.Lk_mm_done:
+  ret
+
+__t_memcmp:
+  xor eax, eax
+  test rdx, rdx
+  je .Lk_mc_done
+.Lk_mc_loop:
+  mov r8b, [rdi]
+  mov r9b, [rsi]
+  cmp r8b, r9b
+  jne .Lk_mc_diff
+  inc rdi
+  inc rsi
+  dec rdx
+  jne .Lk_mc_loop
+.Lk_mc_done:
+  ret
+.Lk_mc_diff:
+  movzx eax, r8b
+  movzx ecx, r9b
+  sub rax, rcx
+  ret
+
 # ---------------------------------------------------------------- machine
 # Every stub follows the call ABI: rdi, rsi, rdx, rcx, r8, r9 in, rax out.
 __k_peek8:

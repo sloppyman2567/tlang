@@ -24,7 +24,7 @@ from Bootstrap.driver import AS_FLAGS, LINK_FLAGS  # noqa: E402
 from Bootstrap.elf import strip_sections  # noqa: E402
 
 SOURCE = os.path.join(ROOT, "tcomp.tl")
-TCOMP_PY = os.path.join(ROOT, "tcomp")
+SEED = os.path.join(ROOT, "Tools", "tcomp-seed")
 
 
 @dataclass
@@ -67,12 +67,13 @@ def link_asm(asm_path, out_path):
 
 
 def build_stage1(path):
-    run([sys.executable, TCOMP_PY, "build", SOURCE, "-o", path])
+    # There is no Python compiler: the checked-in seed binary is stage 1.
+    shutil.copy2(SEED, path)
     return path
 
 
 def check_version(compiler):
-    """The generated compiler must report the same version as stage 0."""
+    """The generated compiler must report the same version as the driver."""
     want = f"tcomp {__version__}"
     for arg in ("--version", "version"):
         got = run([compiler, arg]).stdout.strip()
@@ -115,9 +116,9 @@ def main(argv):
         chain = build_chain(workdir)
         shutil.copy2(chain.stage1, os.path.join(build_dir, "tcomp0"))
         shutil.copy2(chain.stage2, os.path.join(build_dir, "tcomp"))
-        print("stage 1: tcomp.tl -> Build/tcomp0 (via stage 0)")
-        print(f"  Build/tcomp0: {os.path.getsize(chain.stage1)} bytes")
-        print("stage 2: tcomp.tl -> Build/tcomp (via stage 1)")
+        print("stage 1: checked-in seed compiler (Tools/tcomp-seed)")
+        print(f"  seed: {os.path.getsize(chain.stage1)} bytes")
+        print("stage 2: tcomp.tl -> Build/tcomp (via the seed)")
         print(f"  Build/tcomp: {os.path.getsize(chain.stage2)} bytes")
 
         if verify:

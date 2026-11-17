@@ -19,7 +19,7 @@ Supported
   * `printf` / `puts` / `putchar` / `getchar`, `strlen` / `strcmp` / `strcpy` /
     `atoi` / `abs` / `sqrt` / `fabs` / `isdigit` / `isalpha` / `isspace` /
     `toupper` / `tolower`
-  * `malloc` / `calloc` (arena allocation) and `free` (a no-op)
+  * `malloc` / `calloc` (arena allocation) and `free` (returns a block to the heap)
   * `struct`, `enum`, object-like `#define`, `#include` (ignored)
 
 Layout policy
@@ -1901,6 +1901,11 @@ class Emitter:
         if name in ("malloc", "calloc"):
             return self.emit_alloc(node, name)
         if name == "free":
+            # Emitting free is what keeps a translated C program that allocates
+            # in a loop from growing the arena for the life of the process.
+            if node.args:
+                text, _ = self.expr(node.args[0])
+                self.pre_line(f"free({text})")
             return "", INT
 
         if name in LIBRARY:

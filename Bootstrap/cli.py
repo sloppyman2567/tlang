@@ -8,7 +8,7 @@ import sys
 import tempfile
 
 from . import __version__
-from .driver import BuildError, build, compile_path
+from .driver import BuildError, CompileFailed, build, compile_path
 from .errors import TlangError
 
 
@@ -17,8 +17,9 @@ def cmd_build(ns):
                                freestanding=ns.freestanding, entry=ns.entry,
                                bounds=not ns.no_bounds)
     if ns.ir:
-        print(module.format_ir())
-        return 0
+        print("tcomp: --ir is unavailable; tcomp.tl emits assembly directly",
+              file=sys.stderr)
+        return 1
     if ns.asm:
         print(asm, end="")
         return 0
@@ -96,6 +97,8 @@ def main(argv=None):
         if ns.cmd == "build":
             return cmd_build(ns)
         return cmd_run(ns)
+    except CompileFailed:
+        return 1
     except TlangError as exc:
         print(str(exc), file=sys.stderr)
         return 1

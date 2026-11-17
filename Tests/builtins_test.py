@@ -13,7 +13,7 @@ ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, ROOT)
 
 from Bootstrap.builtin_spec import (  # noqa: E402
-    BUILTIN_SPECS, HOSTED_ONLY, KERNEL_ONLY,
+    BUILTIN_SPECS, GENERATED_BUILTINS, GENERATED_DEPS, HOSTED_ONLY, KERNEL_ONLY,
 )
 from Bootstrap.builtins_gen import (  # noqa: E402
     BUILTIN_ARGS, BUILTIN_IDS, BUILTIN_MODES, BUILTIN_NAMES, BUILTINS,
@@ -77,6 +77,21 @@ def main():
             failures.append(f"{name}: argument metadata has the wrong arity")
 
     tcomp = open(os.path.join(ROOT, "tcomp.tl"), encoding="utf-8").read()
+    # A mistyped U_ flag stem in GENERATED_DEPS silently emits an unused flag
+    # and leaves the runtime helper out, which only shows up at link time.
+    # Check both spellings here instead.
+    for name, deps in GENERATED_DEPS.items():
+        if name not in GENERATED_BUILTINS:
+            failures.append(f"{name}: dependency listed for a non-generated builtin")
+        for dep in deps:
+            if dep.startswith("GEN_"):
+                target = dep[4:].lower()
+                if target not in GENERATED_BUILTINS:
+                    failures.append(
+                        f"{name}: {dep} names no generated builtin")
+            elif (dep != dep.upper()
+                  or f"let U_{dep} = 0" not in tcomp):
+                failures.append(f"{name}: unknown usage flag U_{dep}")
     if 'import "Runtime/builtins_gen.tl"' not in tcomp:
         failures.append("tcomp.tl does not import the generated builtin mapping")
     if "fn builtin_kind(n: str) -> int {" in tcomp:

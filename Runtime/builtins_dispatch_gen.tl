@@ -28,6 +28,19 @@ let U_GEN_PIPE = 0
 let U_GEN_DUP2 = 0
 let U_GEN_KILL = 0
 let U_GEN_GETPPID = 0
+let U_GEN_CHDIR = 0
+let U_GEN_RMDIR = 0
+let U_GEN_TRUNCATE = 0
+let U_GEN_FTRUNCATE = 0
+let U_GEN_GETUID = 0
+let U_GEN_GETEUID = 0
+let U_GEN_GETGID = 0
+let U_GEN_GETEGID = 0
+let U_GEN_MMAP = 0
+let U_GEN_MUNMAP = 0
+let U_GEN_TCP_CONNECT = 0
+let U_GEN_TCP_LISTEN = 0
+let U_GEN_TCP_ACCEPT = 0
 
 fn parse_generated_builtin(name: str, kind: int) -> int {
   if kind == 95 {
@@ -197,6 +210,7 @@ fn parse_generated_builtin(name: str, kind: int) -> int {
     el("  mov rdi, rax")
     el("  call __t_close_dir")
     U_GEN_CLOSE_DIR = 1
+    U_GEN_CLOSE_FD = 1
     GTYPE = "int"
     return 1
   }
@@ -393,6 +407,175 @@ fn parse_generated_builtin(name: str, kind: int) -> int {
     GTYPE = "int"
     return 1
   }
+  if kind == 126 {
+    one_arg(name)
+    if GTYPE != "" && types_ok("str", GTYPE) == 0 { err(arg_msg("chdir", 1, "str")) }
+    el("  mov rdi, rax")
+    el("  call __t_chdir")
+    U_GEN_CHDIR = 1
+    GTYPE = "int"
+    return 1
+  }
+  if kind == 127 {
+    one_arg(name)
+    if GTYPE != "" && types_ok("str", GTYPE) == 0 { err(arg_msg("rmdir", 1, "str")) }
+    el("  mov rdi, rax")
+    el("  call __t_rmdir")
+    U_GEN_RMDIR = 1
+    GTYPE = "int"
+    return 1
+  }
+  if kind == 128 {
+    adv()
+    let gen_argc = call_arg_count()
+    if gen_argc != 2 { err("truncate() takes 2 argument(s), got " + gen_argc) }
+    let g0 = tmp()
+    expr()
+    if GTYPE != "" && types_ok("str", GTYPE) == 0 { err(arg_msg("truncate", 1, "str")) }
+    st(g0)
+    expect(TK_COMMA)
+    let g1 = tmp()
+    expr()
+    if GTYPE != "" && types_ok("int", GTYPE) == 0 { err(arg_msg("truncate", 2, "int")) }
+    st(g1)
+    expect(TK_RPAREN)
+    el("  mov rdi, " + loc(g0))
+    el("  mov rsi, " + loc(g1))
+    el("  call __t_truncate")
+    U_GEN_TRUNCATE = 1
+    GTYPE = "int"
+    return 1
+  }
+  if kind == 129 {
+    adv()
+    let gen_argc = call_arg_count()
+    if gen_argc != 2 { err("ftruncate() takes 2 argument(s), got " + gen_argc) }
+    let g0 = tmp()
+    expr()
+    if GTYPE != "" && types_ok("int", GTYPE) == 0 { err(arg_msg("ftruncate", 1, "int")) }
+    st(g0)
+    expect(TK_COMMA)
+    let g1 = tmp()
+    expr()
+    if GTYPE != "" && types_ok("int", GTYPE) == 0 { err(arg_msg("ftruncate", 2, "int")) }
+    st(g1)
+    expect(TK_RPAREN)
+    el("  mov rdi, " + loc(g0))
+    el("  mov rsi, " + loc(g1))
+    el("  call __t_ftruncate")
+    U_GEN_FTRUNCATE = 1
+    GTYPE = "int"
+    return 1
+  }
+  if kind == 130 {
+    adv()
+    let gen_argc = call_arg_count()
+    if gen_argc != 0 { err("getuid() takes 0 argument(s), got " + gen_argc) }
+    expect(TK_RPAREN)
+    el("  call __t_getuid")
+    U_GEN_GETUID = 1
+    GTYPE = "int"
+    return 1
+  }
+  if kind == 131 {
+    adv()
+    let gen_argc = call_arg_count()
+    if gen_argc != 0 { err("geteuid() takes 0 argument(s), got " + gen_argc) }
+    expect(TK_RPAREN)
+    el("  call __t_geteuid")
+    U_GEN_GETEUID = 1
+    GTYPE = "int"
+    return 1
+  }
+  if kind == 132 {
+    adv()
+    let gen_argc = call_arg_count()
+    if gen_argc != 0 { err("getgid() takes 0 argument(s), got " + gen_argc) }
+    expect(TK_RPAREN)
+    el("  call __t_getgid")
+    U_GEN_GETGID = 1
+    GTYPE = "int"
+    return 1
+  }
+  if kind == 133 {
+    adv()
+    let gen_argc = call_arg_count()
+    if gen_argc != 0 { err("getegid() takes 0 argument(s), got " + gen_argc) }
+    expect(TK_RPAREN)
+    el("  call __t_getegid")
+    U_GEN_GETEGID = 1
+    GTYPE = "int"
+    return 1
+  }
+  if kind == 134 {
+    one_arg(name)
+    if GTYPE != "" && types_ok("int", GTYPE) == 0 { err(arg_msg("mmap", 1, "int")) }
+    el("  mov rdi, rax")
+    el("  call __t_mmap")
+    U_GEN_MMAP = 1
+    GTYPE = "str"
+    return 1
+  }
+  if kind == 135 {
+    adv()
+    let gen_argc = call_arg_count()
+    if gen_argc != 2 { err("munmap() takes 2 argument(s), got " + gen_argc) }
+    let g0 = tmp()
+    expr()
+    if GTYPE != "" && types_ok("str", GTYPE) == 0 { err(arg_msg("munmap", 1, "str")) }
+    st(g0)
+    expect(TK_COMMA)
+    let g1 = tmp()
+    expr()
+    if GTYPE != "" && types_ok("int", GTYPE) == 0 { err(arg_msg("munmap", 2, "int")) }
+    st(g1)
+    expect(TK_RPAREN)
+    el("  mov rdi, " + loc(g0))
+    el("  mov rsi, " + loc(g1))
+    el("  call __t_munmap")
+    U_GEN_MUNMAP = 1
+    GTYPE = "int"
+    return 1
+  }
+  if kind == 137 {
+    adv()
+    let gen_argc = call_arg_count()
+    if gen_argc != 2 { err("tcp_connect() takes 2 argument(s), got " + gen_argc) }
+    let g0 = tmp()
+    expr()
+    if GTYPE != "" && types_ok("str", GTYPE) == 0 { err(arg_msg("tcp_connect", 1, "str")) }
+    st(g0)
+    expect(TK_COMMA)
+    let g1 = tmp()
+    expr()
+    if GTYPE != "" && types_ok("int", GTYPE) == 0 { err(arg_msg("tcp_connect", 2, "int")) }
+    st(g1)
+    expect(TK_RPAREN)
+    el("  mov rdi, " + loc(g0))
+    el("  mov rsi, " + loc(g1))
+    el("  call __t_tcp_connect")
+    U_GEN_TCP_CONNECT = 1
+    GTYPE = "int"
+    return 1
+  }
+  if kind == 138 {
+    one_arg(name)
+    if GTYPE != "" && types_ok("int", GTYPE) == 0 { err(arg_msg("tcp_listen", 1, "int")) }
+    el("  mov rdi, rax")
+    el("  call __t_tcp_listen")
+    U_GEN_TCP_LISTEN = 1
+    GTYPE = "int"
+    return 1
+  }
+  if kind == 139 {
+    one_arg(name)
+    if GTYPE != "" && types_ok("int", GTYPE) == 0 { err(arg_msg("tcp_accept", 1, "int")) }
+    el("  mov rdi, rax")
+    el("  call __t_tcp_accept")
+    U_GEN_TCP_ACCEPT = 1
+    GTYPE = "int"
+    return 1
+  }
   return 0
 }
 
@@ -424,4 +607,17 @@ fn emit_generated_runtime() {
   if U_GEN_DUP2 == 1 { rt_emit_dup2() }
   if U_GEN_KILL == 1 { rt_emit_kill() }
   if U_GEN_GETPPID == 1 { rt_emit_getppid() }
+  if U_GEN_CHDIR == 1 { rt_emit_chdir() }
+  if U_GEN_RMDIR == 1 { rt_emit_rmdir() }
+  if U_GEN_TRUNCATE == 1 { rt_emit_truncate() }
+  if U_GEN_FTRUNCATE == 1 { rt_emit_ftruncate() }
+  if U_GEN_GETUID == 1 { rt_emit_getuid() }
+  if U_GEN_GETEUID == 1 { rt_emit_geteuid() }
+  if U_GEN_GETGID == 1 { rt_emit_getgid() }
+  if U_GEN_GETEGID == 1 { rt_emit_getegid() }
+  if U_GEN_MMAP == 1 { rt_emit_mmap() }
+  if U_GEN_MUNMAP == 1 { rt_emit_munmap() }
+  if U_GEN_TCP_CONNECT == 1 { rt_emit_tcp_connect() }
+  if U_GEN_TCP_LISTEN == 1 { rt_emit_tcp_listen() }
+  if U_GEN_TCP_ACCEPT == 1 { rt_emit_tcp_accept() }
 }

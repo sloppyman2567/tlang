@@ -364,6 +364,60 @@ fn builtin_kind(n: str) -> int {
   if str_eq(n, "getppid") == 1 {
     return 121
   }
+  if str_eq(n, "free") == 1 {
+    return 122
+  }
+  if str_eq(n, "realloc") == 1 {
+    return 123
+  }
+  if str_eq(n, "memmove") == 1 {
+    return 124
+  }
+  if str_eq(n, "memcmp") == 1 {
+    return 125
+  }
+  if str_eq(n, "chdir") == 1 {
+    return 126
+  }
+  if str_eq(n, "rmdir") == 1 {
+    return 127
+  }
+  if str_eq(n, "truncate") == 1 {
+    return 128
+  }
+  if str_eq(n, "ftruncate") == 1 {
+    return 129
+  }
+  if str_eq(n, "getuid") == 1 {
+    return 130
+  }
+  if str_eq(n, "geteuid") == 1 {
+    return 131
+  }
+  if str_eq(n, "getgid") == 1 {
+    return 132
+  }
+  if str_eq(n, "getegid") == 1 {
+    return 133
+  }
+  if str_eq(n, "mmap") == 1 {
+    return 134
+  }
+  if str_eq(n, "munmap") == 1 {
+    return 135
+  }
+  if str_eq(n, "mprotect") == 1 {
+    return 136
+  }
+  if str_eq(n, "tcp_connect") == 1 {
+    return 137
+  }
+  if str_eq(n, "tcp_listen") == 1 {
+    return 138
+  }
+  if str_eq(n, "tcp_accept") == 1 {
+    return 139
+  }
   return 0
 }
 
@@ -501,6 +555,54 @@ fn builtin_hosted(n: str) -> int {
     return 1
   }
   if str_eq(n, "getppid") == 1 {
+    return 1
+  }
+  if str_eq(n, "free") == 1 {
+    return 1
+  }
+  if str_eq(n, "realloc") == 1 {
+    return 1
+  }
+  if str_eq(n, "chdir") == 1 {
+    return 1
+  }
+  if str_eq(n, "rmdir") == 1 {
+    return 1
+  }
+  if str_eq(n, "truncate") == 1 {
+    return 1
+  }
+  if str_eq(n, "ftruncate") == 1 {
+    return 1
+  }
+  if str_eq(n, "getuid") == 1 {
+    return 1
+  }
+  if str_eq(n, "geteuid") == 1 {
+    return 1
+  }
+  if str_eq(n, "getgid") == 1 {
+    return 1
+  }
+  if str_eq(n, "getegid") == 1 {
+    return 1
+  }
+  if str_eq(n, "mmap") == 1 {
+    return 1
+  }
+  if str_eq(n, "munmap") == 1 {
+    return 1
+  }
+  if str_eq(n, "mprotect") == 1 {
+    return 1
+  }
+  if str_eq(n, "tcp_connect") == 1 {
+    return 1
+  }
+  if str_eq(n, "tcp_listen") == 1 {
+    return 1
+  }
+  if str_eq(n, "tcp_accept") == 1 {
     return 1
   }
   return 0

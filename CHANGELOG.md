@@ -4,6 +4,61 @@ All notable changes to tlang and tcomp are recorded here. The compiler and the
 language share one version, reported by `tcomp --version` and kept in sync by
 `Tests/version_test.py`.
 
+## 1.4.0
+
+### Added
+
+- `free`, `realloc`, `memmove` and `memcmp`. The arena now keeps power-of-two
+  size-class free lists: `free` makes a block reusable, `realloc` shrinks in
+  place or grows by copying, and `arena_release` drops free blocks above the
+  mark. A fresh allocation keeps its exact capacity; a reused block may have
+  spare slots for `append`.
+- The C translator now emits `free` instead of dropping it, so translated C
+  that releases memory no longer grows the arena for the life of the process.
+- Filesystem navigation and identity builtins: `chdir`, `rmdir`, `truncate`,
+  `ftruncate`, `getuid`, `geteuid`, `getgid` and `getegid`.
+- Anonymous memory mappings: `mmap`, `munmap` and `mprotect`. The result of
+  `mmap` is a byte buffer, so `ld8`/`st8` and `memcpy` address it directly.
+- Blocking TCP over numeric IPv4: `tcp_connect`, `tcp_listen` and
+  `tcp_accept`. There is no resolver, IPv6, UDP or TLS.
+
+### Changed
+
+- The Python stage-0 compiler is gone. `tcomp.tl` is the only compiler;
+  `Tools/tcomp-seed` is a checked-in build used to bootstrap it, and `./tcomp`
+  is a thin driver that assembles and links its output. The Python runtime,
+  builtin metadata, ELF trimming and generators remain as the single source of
+  truth. `Tests/diff_test.py` and `Tests/compare_test.py` were removed: with one
+  compiler there is no optimized/unoptimized or stage-0/stage-1 comparison to
+  make. Sizes are from the self-hosted compiler alone.
+
+### Fixed
+
+- `mmap` now returns `0` on failure instead of a negative errno, which a byte
+  buffer cannot be compared against. TCP rejects ports outside 1–65535, IPv4
+  addresses with empty octets, and octets longer than three digits instead of
+  truncating the port or wrapping the octet to a small value.
+- `newbuf` rejects a negative size with the allocator diagnostic, and `realloc`
+  keeps a struct's field type so field access still compiles.
+- Forward calls now keep their return type: prescan records explicit return
+  annotations and infers literal returns, so `"x" + f()` converts an int return
+  to a string instead of passing the integer to `concat` as a pointer. This was
+  a real miscompilation in the self-hosted compiler that made the shipped
+  stage-2 binary crash on those programs.
+- Generated arity diagnostics use `str(count)` explicitly, which compiles
+  correctly regardless of the forward-call typing above.
+
+- Closing a directory fd with `close_fd` now releases its `read_dir` cursor,
+  just as `close_dir` does. Reusing the fd number for another directory no
+  longer continues the previous directory's iteration. `close_dir` is now a
+  thin alias for `close_fd`, and `builtins_test.py` validates generated-builtin
+  dependency flags so a missing runtime helper fails at metadata check time.
+
+### Sizes
+
+`tcomp` is 203,027 B; hello is 363 B and an empty `main` is 300 B. The fixed
+point holds and the checked-in seed emits the same assembly as stage 2.
+
 ## 1.3.0
 
 ### Added

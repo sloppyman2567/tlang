@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
 """Generate the self-hosted compiler's version constant from VERSION.
 
-VERSION is the one place a release bump edits. Stage 0 reads it directly in
+VERSION is the one place a release bump edits. The driver reads it in
 Bootstrap/__init__.py; the self-hosted compiler imports the tlang constant
-generated here, so neither compiler keeps a hand-maintained copy.
+generated here, so the version is not maintained by hand.
 
     python3 Tools/gen_version.py           # rewrite Runtime/version_gen.tl
     python3 Tools/gen_version.py --check   # fail if it is out of date

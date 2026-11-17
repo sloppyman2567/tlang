@@ -223,6 +223,57 @@ RUNTIME = {
   ret""",
         [],
     ),
+    # memcpy is forward-only, so overlapping ranges need memmove: rely on the
+    # direction flag only for the backward case and clear it again before
+    # returning, because the ABI requires DF=0 at every call boundary.
+    "memmove": (
+        """__t_memmove:
+  mov rax, rdi
+  test rdx, rdx
+  je .Lt_mm_done
+  cmp rdi, rsi
+  jbe .Lt_mm_forward
+  mov rcx, rsi
+  add rcx, rdx
+  cmp rdi, rcx
+  jae .Lt_mm_forward
+  lea rsi, [rsi + rdx - 1]
+  lea rdi, [rdi + rdx - 1]
+  mov rcx, rdx
+  std
+  rep movsb
+  cld
+  ret
+.Lt_mm_forward:
+  mov rcx, rdx
+  rep movsb
+.Lt_mm_done:
+  ret""",
+        [],
+    ),
+    "memcmp": (
+        """__t_memcmp:
+  xor eax, eax
+  test rdx, rdx
+  je .Lt_mc_done
+.Lt_mc_loop:
+  mov r8b, [rdi]
+  mov r9b, [rsi]
+  cmp r8b, r9b
+  jne .Lt_mc_diff
+  inc rdi
+  inc rsi
+  dec rdx
+  jne .Lt_mc_loop
+.Lt_mc_done:
+  ret
+.Lt_mc_diff:
+  movzx eax, r8b
+  movzx ecx, r9b
+  sub rax, rcx
+  ret""",
+        [],
+    ),
     "print": (
         """__t_print:
   push rdi
@@ -298,33 +349,66 @@ RUNTIME = {
     ),
     "alloc": (
         # Every block carries a 16-byte header: capacity and length, both in
-        # 8-byte slots.  `alloc` starts full -- n zeroed elements -- and
-        # `__t_append` grows by reallocating when the length reaches capacity.
-        # Reject negative or overflowing counts before scaling by eight.
+        # 8-byte slots.  A fresh block's capacity is exactly the requested
+        # count, so `__t_append` still grows (and copies) at the point it
+        # always did.  Freed blocks wait on size-class lists whose classes are
+        # powers of two; a reused block may have more capacity than the new
+        # request, and `append` is allowed to use that spare room.  `alloc`
+        # starts full -- n zeroed elements -- and rejects negative or
+        # overflowing counts before scaling by eight.
         """__t_alloc:
   test rdi, rdi
   js .Lt_alloc_bad
   cmp rdi, %d
   ja .Lt_alloc_oom
+  mov r8, rdi
+  mov rdx, rdi
+  xor ecx, ecx
+  cmp r8, 1
+  jbe .Lt_alloc_class
+  lea rax, [r8 - 1]
+  bsr rcx, rax
+  inc rcx
+  cmp rcx, 22
+  jle .Lt_alloc_class
+  mov rcx, 23
+.Lt_alloc_class:
+  lea r9, [rip + __t_free_list]
+  mov rax, [r9 + rcx*8]
+  test rax, rax
+  je .Lt_alloc_bump
+  cmp qword ptr [rax - 16], r8
+  jb .Lt_alloc_bump
+.Lt_alloc_pop:
+  mov r10, [rax]
+  mov [r9 + rcx*8], r10
+  mov [rax - 8], r8
+  mov r11, rax
+  mov rdi, rax
+  mov rcx, r8
+  xor eax, eax
+  rep stosq
+  mov rax, r11
+  ret
+.Lt_alloc_bump:
   mov rcx, [rip + __t_arena_pos]
   lea rax, [rip + __t_arena]
   add rax, rcx
-  mov rdx, rdi
-  shl rdx, 3
-  add rdx, 16
-  add rcx, rdx
+  mov r10, rdx
+  shl r10, 3
+  add r10, 16
+  add rcx, r10
   mov [rip + __t_arena_pos], rcx
   cmp rcx, %d
   ja .Lt_alloc_oom
-  lea r8, [rax + 16]
-  mov [r8 - 16], rdi
-  mov [r8 - 8], rdi
-  mov rdi, r8
-  mov rcx, rdx
-  sub rcx, 16
+  lea r11, [rax + 16]
+  mov [r11 - 16], rdx
+  mov [r11 - 8], r8
+  mov rdi, r11
+  mov rcx, r8
   xor eax, eax
-  rep stosb
-  mov rax, r8
+  rep stosq
+  mov rax, r11
   ret
 .Lt_alloc_oom:
   lea rsi, [rip + __t_oom_msg]
@@ -345,6 +429,131 @@ RUNTIME = {
   mov edi, 134
   syscall""" % (MAX_ALLOC, ARENA_SIZE, len(OOM_MSG), len(BAD_ALLOC_MSG)),
         [],
+    ),
+    "free": (
+        # Return a block to its size-class free list.  The next pointer lives in
+        # the block's first payload slot, which the next `alloc` zeroes again.
+        # Null is a no-op; a pointer outside the arena is a diagnostic, while a
+        # double or interior free is undefined -- there is no block map, and a
+        # header field alone cannot tell an interior pointer from a block.  A
+        # zero-slot block starts exactly at the end of the used arena, so the
+        # end is a legal pointer; free ignores it because there is no payload
+        # slot to hold the link.
+        """__t_free:
+  test rdi, rdi
+  je .Lt_free_done
+  lea rax, [rip + __t_arena]
+  cmp rdi, rax
+  jb .Lt_free_bad
+  add rax, [rip + __t_arena_pos]
+  cmp rdi, rax
+  ja .Lt_free_bad
+  test dil, 7
+  jne .Lt_free_bad
+  mov rcx, [rdi - 16]
+  test rcx, rcx
+  je .Lt_free_done
+  cmp rcx, %d
+  ja .Lt_free_bad
+  cmp rcx, 1
+  ja .Lt_free_above_one
+  xor edx, edx
+  jmp .Lt_free_push
+.Lt_free_above_one:
+  cmp rcx, 4194304
+  ja .Lt_free_big
+  lea rax, [rcx - 1]
+  bsr rdx, rax
+  inc rdx
+  jmp .Lt_free_push
+.Lt_free_big:
+  mov rdx, 23
+.Lt_free_push:
+  lea r8, [rip + __t_free_list]
+  mov rax, [r8 + rdx*8]
+  mov [rdi], rax
+  mov [r8 + rdx*8], rdi
+.Lt_free_done:
+  xor eax, eax
+  ret
+.Lt_free_bad:
+  lea rsi, [rip + __t_free_bad_msg]
+  mov edx, 20
+  mov eax, 1
+  mov edi, 2
+  syscall
+  mov eax, 60
+  mov edi, 134
+  syscall""" % MAX_ALLOC,
+        [],
+    ),
+    "realloc": (
+        # Resize in place while the request fits the capacity; otherwise
+        # allocate the new size, copy the old elements and free the old block.
+        # A null pointer reallocates as `alloc`; a zero size frees and returns a
+        # fresh empty array.  Element kinds are the compiler's business.
+        """__t_realloc:
+  test rdi, rdi
+  je .Lt_realloc_null
+  test rsi, rsi
+  js .Lt_alloc_bad
+  cmp rsi, %d
+  ja .Lt_alloc_oom
+  test rsi, rsi
+  je .Lt_realloc_zero
+  mov r8, [rdi - 16]
+  mov r9, [rdi - 8]
+  cmp rsi, r8
+  ja .Lt_realloc_grow
+  mov r11, rdi
+  cmp rsi, r9
+  jbe .Lt_realloc_setsize
+  lea rdi, [r11 + r9*8]
+  mov rcx, rsi
+  sub rcx, r9
+  xor eax, eax
+  rep stosq
+.Lt_realloc_setsize:
+  mov [r11 - 8], rsi
+  mov rax, r11
+  ret
+.Lt_realloc_grow:
+  push rbx
+  push r12
+  push r13
+  mov rbx, rdi
+  mov r12, rsi
+  mov r13, [rdi - 8]
+  mov rdi, rsi
+  call __t_alloc
+  mov r8, rax
+  xor ecx, ecx
+.Lt_realloc_copy:
+  cmp rcx, r13
+  jge .Lt_realloc_copied
+  mov rdx, [rbx + rcx*8]
+  mov [r8 + rcx*8], rdx
+  inc rcx
+  jmp .Lt_realloc_copy
+.Lt_realloc_copied:
+  mov rdi, rbx
+  mov rbx, r8
+  call __t_free
+  mov rax, rbx
+  pop r13
+  pop r12
+  pop rbx
+  ret
+.Lt_realloc_null:
+  mov rdi, rsi
+  jmp __t_alloc
+.Lt_realloc_zero:
+  push rdi
+  call __t_free
+  pop rdi
+  xor edi, edi
+  jmp __t_alloc""" % MAX_ALLOC,
+        ["alloc", "free"],
     ),
     "bounds_fail": (
         """__t_bounds_fail:
@@ -373,9 +582,36 @@ RUNTIME = {
   ret""",
         [],
     ),
+    # A mark is an offset from __t_arena.  Rewinding drops every allocation
+    # made after it, including free-list nodes at or above it; freed blocks
+    # below the mark stay reusable.  The caller is responsible for not keeping
+    # pointers into a released region.
     "arena_release": (
         """__t_arena_release:
   mov [rip + __t_arena_pos], rdi
+  lea r8, [rip + __t_free_list]
+  lea r9, [rip + __t_arena]
+  add r9, rdi
+  xor ecx, ecx
+.Lt_ar_class:
+  mov rax, [r8 + rcx*8]
+  xor r10, r10
+.Lt_ar_walk:
+  test rax, rax
+  je .Lt_ar_store
+  mov r11, [rax]
+  cmp rax, r9
+  jae .Lt_ar_skip
+  mov [rax], r10
+  mov r10, rax
+.Lt_ar_skip:
+  mov rax, r11
+  jmp .Lt_ar_walk
+.Lt_ar_store:
+  mov [r8 + rcx*8], r10
+  inc rcx
+  cmp rcx, 24
+  jl .Lt_ar_class
   xor eax, eax
   ret""",
         [],
@@ -1288,8 +1524,13 @@ RUNTIME = {
   ret""",
         [],
     ),
+    # newbuf(n) is a zeroed n-byte string buffer.  A negative size used to
+    # slip through the +8/>>3 slot conversion (newbuf(-1) became alloc(0)), so
+    # reject it with the allocator's diagnostic instead.
     "newbuf": (
         """__t_newbuf:
+  test rdi, rdi
+  js .Lt_alloc_bad
   lea rdi, [rdi + 8]
   shr rdi, 3
   jmp __t_alloc""",
@@ -1772,8 +2013,25 @@ RUNTIME = {
   ret""",
         [],
     ),
+    # Closing any descriptor also drops its read_dir cursor.  A directory fd
+    # is just an fd to callers, and the kernel may hand the same number to the
+    # next open_dir; without this the new directory inherits the old cursor.
     "close_fd": (
         """__t_close_fd:
+  mov rsi, rdi
+  xor rax, rax
+.Lt_cfd_scan:
+  cmp rax, 4
+  jge .Lt_cfd_close
+  lea rdx, [rip + __t_rd_fd]
+  cmp qword ptr [rdx + rax*8], rsi
+  jne .Lt_cfd_next
+  mov qword ptr [rdx + rax*8], 0
+.Lt_cfd_next:
+  inc rax
+  jmp .Lt_cfd_scan
+.Lt_cfd_close:
+  mov rdi, rsi
   mov eax, 3
   syscall
   ret""",
@@ -1956,26 +2214,13 @@ RUNTIME = {
   ret""",
         ["newbuf"],
     ),
+    # close_dir is an alias with a clearer name: close_fd already releases the
+    # cursor.  The dependency makes stage 0 emit close_fd's body, and the
+    # GENERATED_DEPS entry below sets U_GEN_CLOSE_FD in the self-hosted one.
     "close_dir": (
         """__t_close_dir:
-  mov rsi, rdi
-  xor rax, rax
-.Lt_cd_scan:
-  cmp rax, 4
-  jge .Lt_cd_close
-  lea rdx, [rip + __t_rd_fd]
-  cmp qword ptr [rdx + rax*8], rsi
-  jne .Lt_cd_next
-  mov qword ptr [rdx + rax*8], 0
-.Lt_cd_next:
-  inc rax
-  jmp .Lt_cd_scan
-.Lt_cd_close:
-  mov rdi, rsi
-  mov eax, 3
-  syscall
-  ret""",
-        [],
+  jmp __t_close_fd""",
+        ["close_fd"],
     ),
     # st_mode is at offset 24 in x86-64 struct stat; stat's buffer starts at
     # rsp + 8.  is_dir/is_file repeat the syscall rather than call file_mode:
@@ -2139,11 +2384,287 @@ RUNTIME = {
   ret""",
         [],
     ),
+    "chdir": (
+        """__t_chdir:
+  mov eax, 80
+  syscall
+  ret""",
+        [],
+    ),
+    "rmdir": (
+        """__t_rmdir:
+  mov eax, 84
+  syscall
+  ret""",
+        [],
+    ),
+    "truncate": (
+        """__t_truncate:
+  mov eax, 76
+  syscall
+  ret""",
+        [],
+    ),
+    "ftruncate": (
+        """__t_ftruncate:
+  mov eax, 77
+  syscall
+  ret""",
+        [],
+    ),
+    "getuid": (
+        """__t_getuid:
+  mov eax, 102
+  syscall
+  ret""",
+        [],
+    ),
+    "geteuid": (
+        """__t_geteuid:
+  mov eax, 107
+  syscall
+  ret""",
+        [],
+    ),
+    "getgid": (
+        """__t_getgid:
+  mov eax, 104
+  syscall
+  ret""",
+        [],
+    ),
+    "getegid": (
+        """__t_getegid:
+  mov eax, 108
+  syscall
+  ret""",
+        [],
+    ),
+    # Anonymous private read/write mapping.  PROT_READ|PROT_WRITE is 3 and
+    # MAP_PRIVATE|MAP_ANONYMOUS is 0x22; fd -1 and offset 0 are required for
+    # the anonymous case.  mmap returns a byte buffer in tlang, so the ld/st
+    # family addresses it directly.  Failure returns 0 (the null value) rather
+    # than the kernel's negative errno: a byte buffer cannot be compared with
+    # zero while a negative value would look like a valid non-null pointer.
+    "mmap": (
+        """__t_mmap:
+  mov rsi, rdi
+  xor edi, edi
+  mov edx, 3
+  mov r10d, 0x22
+  mov r8, -1
+  xor r9d, r9d
+  mov eax, 9
+  syscall
+  test rax, rax
+  js .Lt_mmap_fail
+  ret
+.Lt_mmap_fail:
+  xor eax, eax
+  ret""",
+        [],
+    ),
+    "munmap": (
+        """__t_munmap:
+  mov eax, 11
+  syscall
+  ret""",
+        [],
+    ),
+    "mprotect": (
+        """__t_mprotect:
+  mov eax, 10
+  syscall
+  ret""",
+        [],
+    ),
+    # tcp_connect(ip, port): parse dotted IPv4, build sockaddr_in on the stack
+    # and connect a blocking stream socket.  The address is accumulated high
+    # octet first and byte-swapped before storage, which puts the four bytes in
+    # network order in memory.  A malformed address, a failed connect or a
+    # refused port closes the descriptor and returns -1.
+    "tcp_connect": (
+        """__t_tcp_connect:
+  push rbx
+  push r12
+  push r13
+  sub rsp, 16
+  # A port outside 1..65535 would be truncated by the 16-bit store below and
+  # silently connect somewhere else, so reject it before opening a socket.
+  cmp rsi, 0
+  jle .Lt_tc_fail
+  cmp rsi, 65535
+  ja .Lt_tc_fail
+  mov rbx, rdi
+  mov r12d, esi
+  mov eax, 41
+  mov edi, 2
+  mov esi, 1
+  xor edx, edx
+  syscall
+  test rax, rax
+  js .Lt_tc_fail
+  mov r13, rax
+  xor r8d, r8d
+  xor r9d, r9d
+  xor r10d, r10d
+  xor r11d, r11d
+.Lt_tc_parse:
+  movzx eax, byte ptr [rbx]
+  test eax, eax
+  je .Lt_tc_end
+  cmp eax, 46
+  je .Lt_tc_dot
+  sub eax, 48
+  cmp eax, 9
+  ja .Lt_tc_close
+  # At most three digits per octet: a longer run would overflow r9d and could
+  # wrap back into 0..255 instead of being rejected.
+  inc r11d
+  cmp r11d, 3
+  ja .Lt_tc_close
+  imul r9d, r9d, 10
+  add r9d, eax
+  inc rbx
+  jmp .Lt_tc_parse
+.Lt_tc_dot:
+  # r11 counts digits in the current octet, so "1..2.3", a leading dot and a
+  # trailing dot are rejected instead of being read as an octet of zero.
+  test r11d, r11d
+  je .Lt_tc_close
+  cmp r9d, 255
+  ja .Lt_tc_close
+  cmp r10d, 3
+  jae .Lt_tc_close
+  shl r8d, 8
+  or r8d, r9d
+  xor r9d, r9d
+  xor r11d, r11d
+  inc r10d
+  inc rbx
+  jmp .Lt_tc_parse
+.Lt_tc_end:
+  test r11d, r11d
+  je .Lt_tc_close
+  cmp r10d, 3
+  jne .Lt_tc_close
+  cmp r9d, 255
+  ja .Lt_tc_close
+  shl r8d, 8
+  or r8d, r9d
+  bswap r8d
+  mov word ptr [rsp], 2
+  mov eax, r12d
+  rol ax, 8
+  mov word ptr [rsp + 2], ax
+  mov dword ptr [rsp + 4], r8d
+  mov dword ptr [rsp + 8], 0
+  mov dword ptr [rsp + 12], 0
+  mov eax, 42
+  mov edi, r13d
+  mov rsi, rsp
+  mov edx, 16
+  syscall
+  test rax, rax
+  js .Lt_tc_close
+  mov rax, r13
+  add rsp, 16
+  pop r13
+  pop r12
+  pop rbx
+  ret
+.Lt_tc_close:
+  mov edi, r13d
+  mov eax, 3
+  syscall
+.Lt_tc_fail:
+  mov rax, -1
+  add rsp, 16
+  pop r13
+  pop r12
+  pop rbx
+  ret""",
+        [],
+    ),
+    # tcp_listen(port): bind INADDR_ANY and listen with a small backlog.  The
+    # caller accepts with tcp_accept(fd).  No SO_REUSEADDR: a restarted server
+    # may need a moment before the port is free again.
+    "tcp_listen": (
+        """__t_tcp_listen:
+  push rbx
+  push r12
+  sub rsp, 16
+  # Port 0 would bind an ephemeral port with no way to discover it, and a
+  # larger port would be truncated; reject both before opening a socket.
+  cmp rdi, 0
+  jle .Lt_tl_fail
+  cmp rdi, 65535
+  ja .Lt_tl_fail
+  mov r12d, edi
+  mov eax, 41
+  mov edi, 2
+  mov esi, 1
+  xor edx, edx
+  syscall
+  test rax, rax
+  js .Lt_tl_fail
+  mov rbx, rax
+  mov word ptr [rsp], 2
+  mov eax, r12d
+  rol ax, 8
+  mov word ptr [rsp + 2], ax
+  mov dword ptr [rsp + 4], 0
+  mov dword ptr [rsp + 8], 0
+  mov dword ptr [rsp + 12], 0
+  mov eax, 49
+  mov edi, ebx
+  mov rsi, rsp
+  mov edx, 16
+  syscall
+  test rax, rax
+  js .Lt_tl_close
+  mov eax, 50
+  mov edi, ebx
+  mov esi, 16
+  syscall
+  test rax, rax
+  js .Lt_tl_close
+  mov rax, rbx
+  add rsp, 16
+  pop r12
+  pop rbx
+  ret
+.Lt_tl_close:
+  mov edi, ebx
+  mov eax, 3
+  syscall
+.Lt_tl_fail:
+  mov rax, -1
+  add rsp, 16
+  pop r12
+  pop rbx
+  ret""",
+        [],
+    ),
+    "tcp_accept": (
+        """__t_tcp_accept:
+  mov eax, 43
+  xor esi, esi
+  xor edx, edx
+  syscall
+  ret""",
+        [],
+    ),
+    # wait4 takes a struct rusage * in r10.  It copies to that pointer when it
+    # is non-NULL, so a leftover register value becomes EFAULT; always pass
+    # NULL.  This bit twice: a value left by pipe() made the first waitpid in
+    # the process test fail with -EFAULT.
     "waitpid": (
         """__t_waitpid:
   sub rsp, 16
   mov rdx, rsi
   mov rsi, rsp
+  xor r10d, r10d
   mov eax, 61
   syscall
   test rax, rax

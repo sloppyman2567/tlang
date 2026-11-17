@@ -20,6 +20,7 @@ TCOMP = os.path.join(ROOT, "tcomp")
 TCOMP_TL = os.path.join(ROOT, "tcomp.tl")
 OOB = "index out of bounds"
 BAD_ALLOC = "invalid allocation size"
+BAD_FREE = "invalid free"
 
 
 def run(argv, **kwargs):
@@ -146,6 +147,15 @@ def main():
             ("alloc-negative",
              "fn main() { alloc(-1) }\n",
              "", 134, BAD_ALLOC),
+            ("newbuf-negative",
+             "fn main() { newbuf(-1) }\n",
+             "", 134, BAD_ALLOC),
+            ("free-invalid",
+             "fn main() { free(1234) }\n",
+             "", 134, BAD_FREE),
+            ("free-null",
+             'fn main() { free(0)\n  print("ok") }\n',
+             "ok", 0, ""),
             ("argv-out-of-range",
              "fn main() { print(argv(9)) }\n",
              "", 0, ""),

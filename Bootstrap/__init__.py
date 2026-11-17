@@ -1,7 +1,7 @@
-"""Stage-0 tcomp: the tlang compiler written in Python.
+"""Package metadata for the tcomp driver and generators.
 
-This exists only to build the self-hosted compiler (tcomp.tl).  Once the
-fixed point holds it can be deleted.
+`__version__` is read from VERSION. The self-hosted compiler gets the same
+value from the generated Runtime/version_gen.tl module.
 """
 
 import os

@@ -32,10 +32,11 @@ jobs:
           python3 Tests/run_tests.py
           python3 Tests/errors_test.py
           python3 Tests/sourcemap_test.py
-          python3 Tests/diff_test.py
-          python3 Tests/compare_test.py
           python3 Tests/env_test.py
           python3 Tests/portability_test.py
+          python3 Tests/linux_extra_test.py
+          python3 Tests/linux_more_test.py
+          python3 Tests/linux_stress_test.py
           python3 Tests/floats_test.py
           python3 Tests/modules_test.py
       - name: Programs and C translator

@@ -5,11 +5,13 @@ architecture, test list and known limitations.
 
 ## Ground rules
 
-- tlang is self-hosting. A language or compiler change must land in both
-  `Bootstrap/` (stage 0, Python) and `tcomp.tl` (self-hosted), and stage 2 and
-  stage 3 must remain byte-identical.
-- The release version lives in `VERSION`. Stage 0 reads it in
-  `Bootstrap/__init__.py`; `Tools/gen_version.py` generates the
+- tlang is self-hosting: the compiler is `tcomp.tl`, and `Tools/tcomp-seed` is a
+  checked-in build used only to bootstrap it. Language changes land in
+  `tcomp.tl`; metadata changes land in `Bootstrap/builtin_spec.py` or
+  `Bootstrap/runtime.py`. Stage 2 and stage 3 must remain byte-identical, and
+  the seed must emit the same assembly as stage 2.
+- The release version lives in `VERSION`. `Bootstrap/__init__.py` reads it for
+  the driver; `Tools/gen_version.py` generates the
   `Runtime/version_gen.tl` constant that `tcomp.tl` imports. A release bumps
   `VERSION`, regenerates, and adds a `CHANGELOG.md` entry; CI checks that the
   generated file is current.
@@ -25,7 +27,8 @@ architecture, test list and known limitations.
   in the 98,304-byte load window.
 - Match the style of the surrounding code and do not add dependencies.
 - `taarch64` is always lowercase.
-- `--freestanding` and the machine builtins also land in both compilers. A
+- `--freestanding` and the machine builtins live in `tcomp.tl` and the generated
+  metadata. A
   kernel build emits `call __k_<name>` and takes `print`, `alloc`, `exit` and
   the diagnostics from `Kernel/kruntime.s`; never add a syscall to that path.
 - Hosted Linux builtins that issue syscalls must have their ABI facts checked
@@ -50,30 +53,26 @@ architecture, test list and known limitations.
   that a file survives.
 - A program needs exactly one parameterless `fn main()`; a function, global
   or struct defined twice, or a call to a function that is never defined, is a
-  compile error. Both compilers must report these with a source position and
-  the same message text; `Tests/errors_test.py` covers them.
+  compile error with a source position; `Tests/errors_test.py` covers them.
 - Array indexing is bounds-checked by default, and string indices are
-  checked for negatives. Keep `Tests/bounds_test.py` passing in both
-  compilers, and keep the generated runtime's `__t_bounds_fail` path in sync.
+  checked for negatives. Keep `Tests/bounds_test.py` passing, and keep the generated runtime's `__t_bounds_fail` path in sync.
 - Update `README.md` when a compiler size, timing, test count or the layout
   changes.
 
 ## Build and check
 
 ```bash
-python3 Tests/version_test.py    # stage 0 and tcomp.tl report tcomp 1.3.0
+python3 Tests/version_test.py    # the compiler reports tcomp 1.4.0
 python3 Tests/run_tests.py       # golden output, exit status, binary size
-python3 Tests/diff_test.py       # optimized and --no-opt builds agree
-python3 Tests/compare_test.py    # stage 0 and self-hosted compiler agree
 python3 Tests/builtins_test.py   # builtin metadata contract
 python3 Tests/runtime_test.py    # runtime dependency and assembly contract
 python3 Tests/freestanding_test.py     # kernel image has no syscalls and links
 python3 Tests/machine_builtins_test.py # machine builtins and kernel runtime
 python3 Tests/kernel_test.py     # boots the desktop, clicks and types at it (77 = skipped)
 python3 Tests/sourcemap_test.py  # imported-file diagnostics
-python3 Tests/env_test.py        # environment lookup in both compilers
+python3 Tests/env_test.py        # environment lookup
 python3 Tests/bounds_test.py     # checked indexing and runtime guards
-python3 Tests/portability_test.py     # common Linux builtins in both compilers
+python3 Tests/portability_test.py     # common Linux builtins
 python3 Tests/linux_extra_test.py     # directory, metadata and process builtins
 Tools/selfhost.sh --verify       # stages 2 and 3 must be byte-identical
 ```

@@ -126,6 +126,12 @@ let NFIELD = 0
 let F_NAME = alloc(8000, str)
 let F_TYPE = alloc(8000, str)
 
+# Return annotations of functions declared later in the file.  fn_find only
+# knows functions already parsed, so a forward call previously had type "" and
+# `"x" + f()` skipped the int->string conversion.
+let NPRE_FN = 0
+let PRE_FNAME = alloc(4000, str)
+let PRE_FRET = alloc(4000, str)
 # function table (return types of already-parsed functions)
 let NFN = 0
 let FN_NAME = alloc(4000, str)
@@ -224,6 +230,11 @@ let U_ST32 = 0
 let U_ST64 = 0
 let U_MEMCPY = 0
 let U_MEMSET = 0
+let U_FREE = 0
+let U_REALLOC = 0
+let U_MEMMOVE = 0
+let U_MEMCMP = 0
+let U_MPROTECT = 0
 let U_BOUNDS = 0
 let NO_BOUNDS = 0
 let NTAB = 0
@@ -1746,10 +1757,33 @@ fn note_call(name: str, p: int, ln: int) {
 
 fn fn_ret(name: str) -> str {
   let i = fn_find(name)
-  if i < 0 {
-    return ""
+  if i >= 0 {
+    return FN_RET[i]
   }
-  return FN_RET[i]
+  i = 0
+  while i < NPRE_FN {
+    if str_eq(PRE_FNAME[i], name) == 1 {
+      return PRE_FRET[i]
+    }
+    i = i + 1
+  }
+  return ""
+}
+
+fn pre_fn(name: str, ret: str) {
+  let i = 0
+  while i < NPRE_FN {
+    if str_eq(PRE_FNAME[i], name) == 1 {
+      return
+    }
+    i = i + 1
+  }
+  if NPRE_FN >= 4000 {
+    return
+  }
+  PRE_FNAME[NPRE_FN] = name
+  PRE_FRET[NPRE_FN] = ret
+  NPRE_FN = NPRE_FN + 1
 }
 
 # ---------------------------------------------------------------- parser helpers
@@ -3722,6 +3756,68 @@ fn parse_builtin(name: str, kind: int) {
     GTYPE = "int"
     return
   }
+  if kind == 122 {
+    one_arg("free")
+    if GTYPE == "float" {
+      err(arg_msg("free", 1, "pointer"))
+    }
+    el("  mov rdi, rax")
+    el("  call __t_free")
+    U_FREE = 1
+    GTYPE = "int"
+    return
+  }
+  if kind == 123 {
+    adv()
+    let rc0 = tmp()
+    expr()
+    let rkind = GTYPE
+    if GTYPE == "float" {
+      err(arg_msg("realloc", 1, "pointer"))
+    }
+    st(rc0)
+    expect(TK_COMMA)
+    let rc1 = tmp()
+    expr()
+    if GTYPE != "" && GTYPE != "int" {
+      err(arg_msg("realloc", 2, "int"))
+    }
+    st(rc1)
+    expect(TK_RPAREN)
+    el("  mov rdi, " + loc(rc0))
+    el("  mov rsi, " + loc(rc1))
+    el("  call __t_realloc")
+    U_REALLOC = 1
+    U_FREE = 1
+    # Keep the element kind across the resize so a string buffer remains a
+    # string and an array keeps its element type; anything else is a pointer.
+    GTYPE = "ptr"
+    if str_eq(rkind, "str") == 1 || str_eq(rkind, "arr") == 1 || has_arr_prefix(rkind) == 1 || struct_find(rkind) >= 0 {
+      GTYPE = rkind
+    }
+    return
+  }
+  if kind == 124 {
+    parse_args3("memmove", "str", "str", "int")
+    el("  call __t_memmove")
+    U_MEMMOVE = 1
+    GTYPE = "int"
+    return
+  }
+  if kind == 125 {
+    parse_args3("memcmp", "str", "str", "int")
+    el("  call __t_memcmp")
+    U_MEMCMP = 1
+    GTYPE = "int"
+    return
+  }
+  if kind == 136 {
+    parse_args3("mprotect", "str", "int", "int")
+    el("  call __t_mprotect")
+    U_MPROTECT = 1
+    GTYPE = "int"
+    return
+  }
   if kind == 28 {
     one_arg(name)
     if GTYPE == "int" {
@@ -4722,6 +4818,51 @@ fn prescan() {
             con_add(TV[i + 1], 1, 0, intern(TV[j]), TP[i], TL[i])
           }
         }
+      } else if TN[i] == KW_FN && i + 1 < NT && TK[i + 1] == TK_IDENT {
+        let fname = TV[i + 1]
+        let j = i + 2
+        while j < NT && TK[j] != TK_RPAREN {
+          j = j + 1
+        }
+        if j < NT {
+          j = j + 1
+        }
+        let fret = ""
+        if j + 1 < NT && TK[j] == TK_ARROW && TK[j + 1] == TK_IDENT {
+          fret = norm_type(TV[j + 1])
+        }
+        if fret == "" {
+          # No annotation: infer the common literal returns so a forward call
+          # still gets its type at the call site.  The parser refines this with
+          # CUR_INFER once the body is actually compiled.
+          let k = j
+          let bd = 0
+          while k < NT {
+            if TK[k] == TK_LBRACE {
+              bd = bd + 1
+            } else if TK[k] == TK_RBRACE {
+              if bd == 0 { break }
+              bd = bd - 1
+            } else if bd >= 1 && TK[k] == TK_KW && TN[k] == KW_RETURN {
+              let r = k + 1
+              if r < NT && TK[r] == TK_MINUS {
+                r = r + 1
+              }
+              if r < NT {
+                if TK[r] == TK_INT {
+                  fret = "int"
+                } else if TK[r] == TK_STR {
+                  fret = "str"
+                } else if TK[r] == TK_FLOAT {
+                  fret = "float"
+                }
+              }
+              break
+            }
+            k = k + 1
+          }
+        }
+        pre_fn(fname, fret)
       }
     }
     i = i + 1
@@ -5190,6 +5331,11 @@ fn emit_data() {
       el("  .ascii \"tlang: invalid allocation size\"")
       el("  .byte 10")
     }
+    if U_FREE == 1 {
+      el("__t_free_bad_msg:")
+      el("  .ascii \"tlang: invalid free\"")
+      el("  .byte 10")
+    }
     if U_BOUNDS == 1 {
       el("__t_oob_msg:")
       el("  .ascii \"tlang: index out of bounds\"")
@@ -5236,6 +5382,12 @@ fn emit_bss() {
     el("  .zero 67108864")
     el("__t_arena_pos:")
     el("  .zero 8")
+    # Twenty-four size-class heads: one slot, powers of two up to 2^22, and a
+    # list for blocks larger than that.  Class 0 also holds a freed zero-slot
+    # block, which `free` simply does not recycle because it has no payload
+    # slot for the link.
+    el("__t_free_list:")
+    el("  .zero 192")
     el("__t_buf:")
     el("  .zero 256")
     el("__t_buf_len:")
@@ -5249,7 +5401,7 @@ fn emit_bss() {
     # read_dir's four buffered directory cursors.  BSS costs no file bytes, but
     # emitting it only for programs that iterate directories keeps the symbol
     # set of a program that never opens one unchanged.
-    if U_GEN_READ_DIR == 1 || U_GEN_CLOSE_DIR == 1 {
+    if U_GEN_READ_DIR == 1 || U_GEN_CLOSE_DIR == 1 || U_GEN_CLOSE_FD == 1 {
       el("__t_rd_fd:")
       el("  .zero 32")
       el("__t_rd_pos:")
@@ -5287,7 +5439,7 @@ fn need_alloc() -> int {
   if FREE_MODE == 1 {
     return 0
   }
-  if U_ALLOC == 1 || U_APPEND == 1 || U_ITOA == 1 || U_FTOA == 1 || U_CONCAT == 1 || U_SLICE == 1 || U_READFILE == 1 {
+  if U_ALLOC == 1 || U_APPEND == 1 || U_ITOA == 1 || U_FTOA == 1 || U_CONCAT == 1 || U_SLICE == 1 || U_READFILE == 1 || U_REALLOC == 1 {
     return 1
   }
   if U_INPUT == 1 {
@@ -5368,6 +5520,13 @@ fn emit_runtime() {
   if U_ST64 == 1 { rt_emit_st64() }
   if U_MEMCPY == 1 { rt_emit_memcpy() }
   if U_MEMSET == 1 { rt_emit_memset() }
+  # A kernel build takes these two from Kernel/kruntime.s, so emitting the
+  # hosted bodies too would duplicate the symbols at link time.
+  if U_MEMMOVE == 1 && FREE_MODE == 0 { rt_emit_memmove() }
+  if U_MEMCMP == 1 && FREE_MODE == 0 { rt_emit_memcmp() }
+  if U_FREE == 1 { rt_emit_free() }
+  if U_REALLOC == 1 { rt_emit_realloc() }
+  if U_MPROTECT == 1 && FREE_MODE == 0 { rt_emit_mprotect() }
   if U_STREQ == 1 {
     rt_emit_str_eq()
   }

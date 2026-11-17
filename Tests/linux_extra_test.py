@@ -186,6 +186,25 @@ fn main() {
 }
 ''' % DIRTY_LOCALS
 
+# close_fd on a directory fd must release the cursor too, otherwise a reused
+# fd number continues returning entries from the previous directory.
+CLOSEFD_SRC = '''fn main() {
+  let a = argv(1)
+  let b = argv(2)
+  for i in 1..6 {
+    write_file(a + "/a" + i, "x")
+  }
+  write_file(b + "/b1", "x")
+  let d1 = open_dir(a)
+  print_int(read_dir(d1)[0] == 97)
+  print(" ")
+  close_fd(d1)
+  let d2 = open_dir(b)
+  print_int(read_dir(d2)[0] == 98)
+  print("\\n")
+}
+'''
+
 # A fifth concurrent directory has no cursor slot; it must fail cleanly with
 # "" rather than reading past the four-slot cursor arrays in BSS.
 FIVEDIRS_SRC = '''fn main() {
@@ -270,6 +289,7 @@ def main():
             dirty_exe = build(EXEC_DIRTY_SRC, compiler, work,
                               "dirty-" + label)
             five_exe = build(FIVEDIRS_SRC, compiler, work, "five-" + label)
+            cfd_exe = build(CLOSEFD_SRC, compiler, work, "cfd-" + label)
 
             tree = os.path.join(work, "tree-" + label)
             got = subprocess.run([dir_exe, tree], capture_output=True,
@@ -320,6 +340,17 @@ def main():
                 failures.append(f"{label}: five dirs {got.stdout!r}")
             for path in five:
                 shutil.rmtree(path)
+
+            ca = os.path.join(work, "cfd-a-" + label)
+            cb = os.path.join(work, "cfd-b-" + label)
+            os.mkdir(ca)
+            os.mkdir(cb)
+            got = subprocess.run([cfd_exe, ca, cb], capture_output=True,
+                                 text=True)
+            if (got.returncode, got.stdout) != (0, "1 1\n"):
+                failures.append(f"{label}: close_fd dir {got.stdout!r}")
+            shutil.rmtree(ca)
+            shutil.rmtree(cb)
 
             serial = check_diagnostics(compiler, failures, label, work, serial)
             if not any(f.startswith(label) for f in failures):

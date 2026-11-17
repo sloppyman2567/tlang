@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Check the tlang/tcomp version contract.
 
-Stage 0 reads Bootstrap.__version__ from VERSION; the self-hosted compiler
+The driver reads Bootstrap.__version__ from VERSION; the self-hosted compiler
 imports the TLANG_VERSION constant generated into Runtime/version_gen.tl. They
 must agree, and both CLI spellings must report the same value.
 Tools/selfhost.py checks the generated stages too.
