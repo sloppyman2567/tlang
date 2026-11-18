@@ -5,7 +5,7 @@ Stages and the fixed-point comparison live in Tools/selfhost.py.  This test
 adds the behavioural requirement: the self-hosted compiler must pass every
 golden case.
 
-  1. stage 1 = the Python bootstrap compiler compiling tcomp.tl
+  1. stage 1 = the checked-in seed compiler
   2. stage 2 = stage 1 compiling tcomp.tl
   3. stage 3 = stage 2 compiling tcomp.tl
   4. assert stage 2 and stage 3 emit identical assembly and binaries

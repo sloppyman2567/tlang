@@ -72,6 +72,10 @@ fn main() {
   print(" ")
   print(port_base("/a/b/"))
   print(" ")
+  print(port_base("/"))
+  print(" ")
+  print(port_dir("/"))
+  print(" ")
   print(port_dir("/a/b"))
   print(" ")
   print(port_ext("a.tar.gz"))
@@ -86,6 +90,10 @@ fn main() {
   let root = argv(1)
   if port_mkdir_p(root + "/a/b") == 0 { print(port_error()) exit(1) }
   print_int(is_dir(root + "/a/b"))
+  print(" ")
+  print_int(port_copy(root, root + "/not-a-file"))
+  print(" ")
+  print_int(file_exists(root + "/not-a-file"))
   print(" ")
   let data = newbuf(5)
   data[0] = 0
@@ -149,7 +157,7 @@ fn main() {
 }
 '''.replace("@MODULE@", PORT_MODULE)
 
-PORT_WANT = b"1 b /a .gz a/b 1 1\n1 1 5 1 1 1 1 1 1 150000 1 1 1 1 1 7 1 70000\n"
+PORT_WANT = b"1 b / / /a .gz a/b 1 1\n1 0 0 1 5 1 1 1 1 1 1 150000 1 1 1 1 1 7 1 70000\n"
 
 BAD_ARGS = (
     ('fn main() { now(1) }', 'now'),

@@ -1,12 +1,15 @@
 #!/usr/bin/env python3
 """Differential tests for Modules/tjson.tl and Modules/tzip.tl.
 
-JSON output is compared with Python's json module; ZIP archives written by
-tlang are read with zipfile (including compressed, binary and empty entries),
-and archives written by zipfile are read back by tlang. The deflated cases
-cover both fixed and dynamic Huffman blocks.
+JSON output is compared with Python's json module; the module checks also
+cover the RFC 6901 section 5 pointer table and UTF-8 decoding. ZIP archives
+written by tlang are read with zipfile (including compressed, binary and empty
+entries), and archives written by zipfile are read back by tlang. The deflated
+cases cover both fixed and dynamic Huffman blocks.
 """
 
+import io
+import json
 import os
 import random
 import subprocess
@@ -42,6 +45,22 @@ JSON_EXPECTED = b"""12|tlang|4|1|-1|-1.5e2
 -1|leading zero in number|1
 -1|raw control character in string|2
 -1|fraction needs a digit|2
+-1 -1 0
+7 8 9 10 11 -1 -1
+5|2|bar|0|1|2|3|4|5|6|7|8
+-1 -1 -1 -1 -1 -1 -1
+9 11 10
+caf\xc3\xa9
+clef
+caf\xc3\xa9 \xf0\x9d\x84\x9e
+{"items":[2,true,"last"]}
+"line\\nquote\\"slash\\\\"
+-1 1.5e2
+-1 -1 -1 -1
+[1,2]
+[1]
+{"x":1,"y":3}
+{"x":1}
 """
 
 
@@ -103,11 +122,31 @@ def expected_listing(path):
     return ("\n".join(lines) + "\n").encode()
 
 
-def check_json(exe):
+def check_json(exe, work):
     got = run(exe, "json")
     if got != JSON_EXPECTED:
         raise AssertionError(f"JSON output differs\nwant: {JSON_EXPECTED!r}\n"
                              f"got:  {got!r}")
+
+    # Parse a document built from actual repository source, not a handful of
+    # hand-written fields. Escapes, UTF-8 and long string tokens all appear.
+    paths = ["README.md", "Modules/tjson.tl", "Modules/tzip.tl",
+             "Modules/tport.tl", "Tests/stdlib_test.py", "tlang-icon.svg"]
+    doc = {"generated_from": "tlang repository", "files": []}
+    for rel in paths:
+        with open(os.path.join(ROOT, rel), encoding="utf-8") as fh:
+            doc["files"].append({"path": rel, "text": fh.read()})
+    source = os.path.join(work, "real.json")
+    text = json.dumps(doc, ensure_ascii=False, separators=(",", ":"))
+    with open(source, "w", encoding="utf-8") as fh:
+        fh.write(text)
+    got = run(exe, "json-file", source)
+    want = (text + "\n").encode()
+    if got != want:
+        at = next((i for i, (a, b) in enumerate(zip(want, got)) if a != b),
+                  min(len(want), len(got)))
+        raise AssertionError(
+            f"real JSON differs at byte {at}: {want[at:at + 40]!r} != {got[at:at + 40]!r}")
 
 
 def check_zip(exe, work):
@@ -239,6 +278,74 @@ def check_zip(exe, work):
         raise AssertionError("empty archive was not rejected as ZIP_E_IO")
 
 
+def check_real_zip(exe, work):
+    # Python writes a real archive from repository files, including the
+    # checked-in compiler binary, and tlang must extract every byte.
+    entries = [
+        ("README.md", os.path.join(ROOT, "README.md")),
+        ("tport.tl", os.path.join(ROOT, "Modules", "tport.tl")),
+        ("tcomp-seed", os.path.join(ROOT, "Tools", "tcomp-seed")),
+        ("tlang-icon.png", os.path.join(ROOT, "tlang-icon.png")),
+    ]
+    archive = os.path.join(work, "real-repo.zip")
+    with zipfile.ZipFile(archive, "w", zipfile.ZIP_DEFLATED,
+                         compresslevel=9) as zf:
+        for name, path in entries:
+            zf.write(path, arcname=name)
+        zf.comment = b"real tlang repository archive"
+    if run(exe, "zip-count", archive) != b"4\n":
+        raise AssertionError("real archive count differs")
+    for index, (name, path) in enumerate(entries):
+        out = os.path.join(work, "real-%d.bin" % index)
+        if run(exe, "zip-extract", archive, str(index), out) != b"1 0\n":
+            raise AssertionError(f"real archive extract failed: {name}")
+        with open(path, "rb") as fh:
+            want = fh.read()
+        with open(out, "rb") as fh:
+            if fh.read() != want:
+                raise AssertionError(f"real archive data differs: {name}")
+
+    # A non-seekable writer makes Python use data descriptors (flag bit 3),
+    # which is what streaming downloaders and some producers emit.
+    class Sink(io.BytesIO):
+        def seekable(self):
+            return False
+
+        def seek(self, *args):
+            raise io.UnsupportedOperation("stream")
+
+    sink = Sink()
+    with zipfile.ZipFile(sink, "w", zipfile.ZIP_DEFLATED) as zf:
+        zf.writestr("streamed.txt", ("streamed " * 500).encode())
+        zf.writestr("binary.dat", bytes(range(256)))
+    streamed = os.path.join(work, "streamed.zip")
+    with open(streamed, "wb") as fh:
+        fh.write(sink.getvalue())
+    if run(exe, "zip-count", streamed) != b"2\n":
+        raise AssertionError("streamed archive count differs")
+    with zipfile.ZipFile(streamed) as zf:
+        for index, info in enumerate(zf.infolist()):
+            out = os.path.join(work, "streamed-%d.bin" % index)
+            if run(exe, "zip-extract", streamed, str(index), out) != b"1 0\n":
+                raise AssertionError(f"streamed extract failed: {info.filename}")
+            with open(out, "rb") as fh:
+                if fh.read() != zf.read(info):
+                    raise AssertionError(f"streamed data differs: {info.filename}")
+
+    # tlang's writer on a real binary file, checked by Python's zipfile.
+    icon = os.path.join(ROOT, "tlang-icon.png")
+    written = os.path.join(work, "real-written.zip")
+    if run(exe, "zip-file", written, "icon.png", icon) != b"created 1\n":
+        raise AssertionError("real-file tlang archive was not created")
+    with zipfile.ZipFile(written) as zf:
+        if zf.testzip() is not None:
+            raise AssertionError("real-file tlang archive has a bad CRC")
+        with open(icon, "rb") as fh:
+            want = fh.read()
+        if zf.read("icon.png") != want:
+            raise AssertionError("real-file tlang archive data differs")
+
+
 def check_writer_stress(exe, work):
     archive = os.path.join(work, "tlang-stress.zip")
     if run(exe, "zip-stress", archive) != b"created 3\n":
@@ -266,8 +373,9 @@ def main():
             os.makedirs(case, exist_ok=True)
             exe = build_program(work, label, compiler)
             try:
-                check_json(exe)
+                check_json(exe, case)
                 check_zip(exe, case)
+                check_real_zip(exe, case)
                 check_writer_stress(exe, case)
             except AssertionError as exc:
                 print(f"FAIL {label}: {exc}", file=sys.stderr)

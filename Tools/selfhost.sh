@@ -4,9 +4,9 @@
 #   Tools/selfhost.sh            # Build/ -> Build/tcomp
 #   Tools/selfhost.sh --verify   # also prove the fixed point
 #
-# Stage 0 (the Python compiler in Bootstrap/) exists only for this.  The
-# staging, linking and fixed-point logic lives in Tools/selfhost.py so CI and
-# Tests/fixedpoint.py use the same implementation.
+# Stage 1 is the checked-in Tools/tcomp-seed. The staging, linking and
+# fixed-point logic lives in Tools/selfhost.py so CI and Tests/fixedpoint.py
+# use the same implementation.
 set -euo pipefail
 
 root=$(cd "$(dirname "$0")/.." && pwd)

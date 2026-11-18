@@ -13,13 +13,8 @@ from .errors import TlangError
 
 
 def cmd_build(ns):
-    asm, module = compile_path(ns.file, opt=not ns.no_opt,
-                               freestanding=ns.freestanding, entry=ns.entry,
-                               bounds=not ns.no_bounds)
-    if ns.ir:
-        print("tcomp: --ir is unavailable; tcomp.tl emits assembly directly",
-              file=sys.stderr)
-        return 1
+    asm, module = compile_path(ns.file, freestanding=ns.freestanding,
+                               entry=ns.entry, bounds=not ns.no_bounds)
     if ns.asm:
         print(asm, end="")
         return 0
@@ -35,7 +30,7 @@ def cmd_run(ns):
         print("tcomp: --freestanding has nothing to exec into; "
               "use 'tcomp build --freestanding -T SCRIPT'", file=sys.stderr)
         return 1
-    asm, _module = compile_path(ns.file, opt=not ns.no_opt)
+    asm, _module = compile_path(ns.file)
     workdir = tempfile.mkdtemp(prefix="tcomp-run-")
     try:
         exe = os.path.join(workdir, "prog")
@@ -58,15 +53,11 @@ def main(argv=None):
     b.add_argument("-o", "--output", help="output path (default: source name)")
     b.add_argument("--asm", action="store_true",
                    help="print the generated assembly instead of building")
-    b.add_argument("--ir", action="store_true",
-                   help="print the generated IR instead of building")
     b.add_argument("--keep-asm", metavar="PATH",
                    help="also write the assembly to PATH")
     b.add_argument("--keep-sections", action="store_true",
                    help="keep ELF section headers (slightly larger, and "
                         "readable by objdump/readelf)")
-    b.add_argument("--no-opt", action="store_true",
-                   help="skip IR optimization (for debugging codegen)")
     b.add_argument("--no-bounds", action="store_true",
                    help="omit index bounds checks (emulator hot loops only)")
     b.add_argument("--freestanding", action="store_true",
@@ -81,8 +72,6 @@ def main(argv=None):
     r.add_argument("file")
     r.add_argument("--freestanding", action="store_true",
                    help="rejected: a kernel image cannot run as a process")
-    r.add_argument("--no-opt", action="store_true",
-                   help="skip IR optimization (for debugging codegen)")
     r.add_argument("args", nargs=argparse.REMAINDER,
                    help="arguments passed to the program")
 

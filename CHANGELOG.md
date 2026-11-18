@@ -4,7 +4,7 @@ All notable changes to tlang and tcomp are recorded here. The compiler and the
 language share one version, reported by `tcomp --version` and kept in sync by
 `Tests/version_test.py`.
 
-## Unreleased
+## 1.5.0
 
 ### License
 
@@ -17,6 +17,18 @@ language share one version, reported by `tcomp --version` and kept in sync by
   pretty/compact emitter. `Programs/tjson.tl` now imports it instead of
   carrying its own copy, and parsing rejects leading zeroes, incomplete
   fractions or exponents, raw control characters and unknown escapes.
+  `json_get` also accepts quoted bracket keys such as `.["a.b"]` and matches
+  escaped object keys after decoding them.
+- `Modules/tjson.tl`: `json_pointer` implements RFC 6901 pointer resolution,
+  including `~0`/`~1` decoding and strict array indices. `tjson get` and
+  `tjson keys` accept `--pointer`; `json_get` accepts negative jq-style array
+  indices. Decoded strings and keys now write non-ASCII `\uXXXX` escapes,
+  including surrogate pairs, as UTF-8.
+- `Modules/tjson.tl`: constructors and mutable array/object updates for
+  building documents. `json_new_string` escapes text, `json_new_number`
+  validates the number grammar, and updates return the node to keep. Direct
+  and indirect cycles are rejected; in-place runs are extended when possible
+  and copied otherwise.
 - `Modules/tzip.tl`: ZIP archives with CRC-32. `zip_open` reads central
   directories and `zip_data`/`zip_extract` decompress stored and deflated
   entries, including both fixed and dynamic Huffman blocks. The writer picks
@@ -39,6 +51,29 @@ language share one version, reported by `tcomp --version` and kept in sync by
   empty environment. A portable tool launched with `exec` keeps `PATH`, `HOME`
   and locale settings. The self-hosted compiler captures `argc/argv` when a
   program calls `exec`, since that is where `envp` starts.
+- `Tools/tcomp-seed` was rebuilt at 1.5.0 so the checked-in bootstrap compiler
+  reports the release version.
+
+### Fixed
+
+- `port_base("/")` returns `/`, and `port_copy` rejects directories and other
+  non-regular sources and detects short reads instead of creating a truncated
+  file.
+- `json_child`, `json_get` and `json_has` handle invalid tree indices without
+  an out-of-bounds access. The JSON and ZIP tests now exercise repository
+  source, real archives and streamed archives with data descriptors.
+
+### Removed
+
+- The `--ir` and `--no-opt` options. The self-hosted compiler emits assembly
+  directly and has no separate optimization mode, so `--ir` could only fail
+  and `--no-opt` did nothing.
+
+### Sizes
+
+`tcomp` is 203,157 B; hello is 363 B and an empty `main` is 300 B. The
+programs are tbox 6,767 B, tjson 27,728 B, tbf 4,464 B, tchip8 18,976 B and
+tgameboy 30,529 B. The fixed point holds.
 
 ## 1.4.0
 

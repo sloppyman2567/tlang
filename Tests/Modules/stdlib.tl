@@ -52,6 +52,194 @@ fn json_check() {
   json_bad("01")
   json_bad("\"a\n\"")
   json_bad("1.")
+
+  # Invalid tree indices are API errors, not out-of-bounds accesses.
+  print_int(json_child(-1, 0))
+  print(" ")
+  print_int(json_get(-1, "[0]"))
+  print(" ")
+  print_int(json_has(-1, ".x"))
+  print("\n")
+
+  json_extended()
+  json_pointer_check()
+  json_unicode_check()
+  json_build_check()
+}
+
+fn json_extended() {
+  let root = json_parse("{\"a\\u0062\":7,\"a.b\":8,\"a[b]\":9,\"na\\u00efve\":10,\"quote\\\"key\":11}")
+  if root < 0 {
+    print("ext-error ")
+    print(json_error())
+    print("\n")
+    return
+  }
+  print(json_text(json_get(root, ".ab")))
+  print(" ")
+  print(json_text(json_get(root, ".[\"a.b\"]")))
+  print(" ")
+  print(json_text(json_get(root, "[\"a[b]\"]")))
+  print(" ")
+  print(json_text(json_get(root, ".[\"na\\u00efve\"]")))
+  print(" ")
+  print(json_text(json_get(root, ".[\"quote\\\"key\"]")))
+  print(" ")
+  print_int(json_get(root, ".[\"nope\"]"))
+  print(" ")
+  print_int(json_get(root, ".[\"a.b]"))
+  print("\n")
+}
+
+fn json_pointer_check() {
+  # RFC 6901 section 5 example document and pointer table. The expected
+  # values are the ones printed by the RFC, in the same order.
+  let doc = "{\"foo\":[\"bar\",\"baz\"],\"\":0,\"a/b\":1,\"c%d\":2,\"e^f\":3,\"g|h\":4,\"i\\\\j\":5,\"k\\\"l\":6,\" \":7,\"m~n\":8}"
+  let root = json_parse(doc)
+  if root < 0 {
+    print("pointer-error ")
+    print(json_error())
+    print("\n")
+    return
+  }
+  print_int(json_kind(json_pointer(root, "")))
+  print("|")
+  print_int(json_count(json_pointer(root, "/foo")))
+  print("|")
+  print(json_text(json_pointer(root, "/foo/0")))
+  print("|")
+  print(json_text(json_pointer(root, "/")))
+  print("|")
+  print(json_text(json_pointer(root, "/a~1b")))
+  print("|")
+  print(json_text(json_pointer(root, "/c%d")))
+  print("|")
+  print(json_text(json_pointer(root, "/e^f")))
+  print("|")
+  print(json_text(json_pointer(root, "/g|h")))
+  print("|")
+  print(json_text(json_pointer(root, "/i\\j")))
+  print("|")
+  print(json_text(json_pointer(root, "/k\"l")))
+  print("|")
+  print(json_text(json_pointer(root, "/ ")))
+  print("|")
+  print(json_text(json_pointer(root, "/m~0n")))
+  print("\n")
+
+  # Invalid syntax, out-of-range indices and non-container traversal all fail.
+  print_int(json_pointer(root, "foo"))
+  print(" ")
+  print_int(json_pointer(root, "/foo/01"))
+  print(" ")
+  print_int(json_pointer(root, "/foo/-"))
+  print(" ")
+  print_int(json_pointer(root, "/a~2b"))
+  print(" ")
+  print_int(json_pointer(root, "/m~"))
+  print(" ")
+  print_int(json_pointer(root, "/foo/2"))
+  print(" ")
+  print_int(json_pointer(root, "/foo/0/x"))
+  print("\n")
+
+  # RFC 6901 replaces ~1 before ~0, so ~01 is the key "~1", not "/".
+  let escapes = json_parse("{\"~1\":9,\"/\":10,\"~0\":11}")
+  if escapes < 0 {
+    print("escape-error\n")
+    return
+  }
+  print(json_text(json_pointer(escapes, "/~01")))
+  print(" ")
+  print(json_text(json_pointer(escapes, "/~00")))
+  print(" ")
+  print(json_text(json_pointer(escapes, "/~1")))
+  print("\n")
+}
+
+fn json_unicode_check() {
+  let root = json_parse("{\"caf\\u00e9\":\"caf\\u00e9\",\"\\uD834\\uDD1E\":\"clef\"}")
+  if root < 0 {
+    print("unicode-error ")
+    print(json_error())
+    print("\n")
+    return
+  }
+  json_print_value(json_get(root, ".[\"caf\\u00e9\"]"))
+  json_print_value(json_get(root, ".[\"\\uD834\\uDD1E\"]"))
+  json_print_decoded(json_key(root, 0))
+  print(" ")
+  json_print_decoded(json_key(root, 1))
+  print("\n")
+}
+
+fn json_build_check() {
+  let arr = json_new_array()
+  arr = json_array_push(arr, json_new_string("first"))
+  arr = json_array_push(arr, json_new_int(2))
+  arr = json_array_push(arr, json_new_bool(1))
+  arr = json_array_push(arr, json_new_null())
+  arr = json_array_set(arr, -1, json_new_string("last"))
+  arr = json_array_remove(arr, 0)
+
+  let obj = json_new_object()
+  obj = json_object_set(obj, "name", json_new_string("tlang"))
+  obj = json_object_set(obj, "items", arr)
+  obj = json_object_set(obj, "name", json_new_string("updated"))
+  obj = json_object_remove(obj, "missing")
+  obj = json_object_remove(obj, "name")
+  json_emit(obj, 1)
+  print("\n")
+
+  let esc = json_new_string("line\nquote\"slash\\")
+  json_emit(esc, 1)
+  print("\n")
+  print_int(json_new_number("01"))
+  print(" ")
+  print(json_text(json_new_number("1.5e2")))
+  print("\n")
+  print_int(json_array_push(arr, arr))
+  print(" ")
+  print_int(json_object_set(obj, "self", obj))
+  print(" ")
+  let cycle_a = json_new_array()
+  let cycle_b = json_new_array()
+  cycle_a = json_array_push(cycle_a, cycle_b)
+  print_int(json_array_push(cycle_b, cycle_a))
+  print(" ")
+  let cycle_obj_a = json_new_object()
+  let cycle_obj_b = json_new_object()
+  cycle_obj_a = json_object_set(cycle_obj_a, "child", cycle_obj_b)
+  print_int(json_object_set(cycle_obj_b, "back", cycle_obj_a))
+  print("\n")
+
+  # Parsed containers usually have siblings' links after their own run, so
+  # these updates take the copy path and leave the original node unchanged.
+  let parsed = json_parse("{\"a\":[1],\"nested\":{\"x\":1},\"b\":2}")
+  let a = json_get(parsed, ".a")
+  let a2 = json_array_push(a, json_new_int(2))
+  json_emit(a2, 1)
+  print("\n")
+  json_emit(a, 1)
+  print("\n")
+  let nested = json_get(parsed, ".nested")
+  let nested2 = json_object_set(nested, "y", json_new_int(3))
+  json_emit(nested2, 1)
+  print("\n")
+  json_emit(nested, 1)
+  print("\n")
+}
+
+fn json_file(path: str) {
+  let root = json_parse_file(path)
+  if root < 0 {
+    print("error ")
+    print(json_error())
+    print("\n")
+    exit(1)
+  }
+  json_emit(root, 1)
+  print("\n")
 }
 
 fn zip_create_test(path: str) {
@@ -96,6 +284,42 @@ fn zip_create_test(path: str) {
     exit(1)
   }
   if zip_add("dir/nested.txt", "nested", 6) == 0 {
+    print("add-fail ")
+    print_int(zip_error())
+    print("\n")
+    exit(1)
+  }
+  if zip_finish() == 0 {
+    print("finish-fail ")
+    print_int(zip_error())
+    print("\n")
+    exit(1)
+  }
+  print("created ")
+  print_int(zip_count())
+  print("\n")
+}
+
+fn zip_count_test(path: str) {
+  let n = zip_open(path)
+  if n < 0 {
+    print("error ")
+    print_int(zip_error())
+    print("\n")
+    exit(1)
+  }
+  print_int(n)
+  print("\n")
+}
+
+fn zip_file_test(path: str, name: str, src: str) {
+  if zip_create(path) == 0 {
+    print("create-fail ")
+    print_int(zip_error())
+    print("\n")
+    exit(1)
+  }
+  if zip_add_file(name, src) == 0 {
     print("add-fail ")
     print_int(zip_error())
     print("\n")
@@ -218,8 +442,20 @@ fn main() {
     json_check()
     return
   }
+  if mode == "json-file" {
+    json_file(argv(2))
+    return
+  }
   if mode == "zip-create" {
     zip_create_test(argv(2))
+    return
+  }
+  if mode == "zip-file" {
+    zip_file_test(argv(2), argv(3), argv(4))
+    return
+  }
+  if mode == "zip-count" {
+    zip_count_test(argv(2))
     return
   }
   if mode == "zip-stress" {

@@ -13,8 +13,9 @@ architecture, test list and known limitations.
 - The release version lives in `VERSION`. `Bootstrap/__init__.py` reads it for
   the driver; `Tools/gen_version.py` generates the
   `Runtime/version_gen.tl` constant that `tcomp.tl` imports. A release bumps
-  `VERSION`, regenerates, and adds a `CHANGELOG.md` entry; CI checks that the
-  generated file is current.
+  `VERSION`, regenerates, adds a `CHANGELOG.md` entry, and rebuilds
+  `Tools/tcomp-seed` from `tcomp.tl` so stage 1 reports the release version;
+  CI checks that the generated file is current.
 - `Bootstrap/runtime.py`, `Bootstrap/builtin_spec.py` and `Tools/gen_kinds.py`
   are sources of truth. `Runtime/runtime_gen.tl`, `Runtime/kinds_gen.tl`,
   `Runtime/builtins_gen.tl`, `Runtime/builtins_dispatch_gen.tl`,
@@ -62,7 +63,7 @@ architecture, test list and known limitations.
 ## Build and check
 
 ```bash
-python3 Tests/version_test.py    # the compiler reports tcomp 1.4.0
+python3 Tests/version_test.py    # the compiler reports tcomp 1.5.0
 python3 Tests/run_tests.py       # golden output, exit status, binary size
 python3 Tests/builtins_test.py   # builtin metadata contract
 python3 Tests/runtime_test.py    # runtime dependency and assembly contract

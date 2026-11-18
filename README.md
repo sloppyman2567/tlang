@@ -3,10 +3,10 @@
 <p align="center">
   <img src="tlang-icon.png" alt="tlang icon" width="112"><br>
   <a href="https://github.com/sloppyman2567/tlang/actions/workflows/ci.yml"><img src="https://github.com/sloppyman2567/tlang/actions/workflows/ci.yml/badge.svg" alt="CI"></a>
-  <img src="https://img.shields.io/badge/version-1.4.0-blue" alt="version 1.4.0">
+  <img src="https://img.shields.io/badge/version-1.5.0-blue" alt="version 1.5.0">
 </p>
 
-Version 1.4.0 — see [CHANGELOG.md](CHANGELOG.md) for release notes.
+Version 1.5.0 — see [CHANGELOG.md](CHANGELOG.md) for release notes.
 
 A small, high-level language that compiles to **very small native Linux binaries**.
 Its compiler, **tcomp**, is written in tlang itself. The same language is used
@@ -40,7 +40,7 @@ Measured on x86-64 Linux with binutils 2.47:
 | primes, first 20 (functions, loops, calls) | 642 B |
 | words (stdin, `read_file`, `argv`) | 1,572 B |
 | **tbox** (four tools: `wc`, `head`, `tail`, `grep`) | **6,767 B** |
-| **tjson** (JSON validate, format, query) | 15,474 B |
+| **tjson** (JSON validate, format, query) | 27,728 B |
 | **tbf** (Brainfuck interpreter) | 4,464 B |
 | tcomp, the whole compiler | 203,157 B |
 | *for comparison:* hello world in C, `gcc -Os -s` | 14,472 B |
@@ -67,7 +67,7 @@ syscalls and `ld` writes a single read/execute segment.
 ## Quick start
 
 ```bash
-./tcomp --version                       # tcomp 1.4.0
+./tcomp --version                       # tcomp 1.5.0
 ./tcomp run Examples/hello.tl           # compile and run
 ./tcomp build Examples/hello.tl         # -> ./hello
 ./tcomp build Examples/hello.tl --asm   # show the generated assembly
@@ -301,7 +301,7 @@ Integer literals can be written in hex (`0xFF`) or binary (`0b1010_1111`), with
 
 `len()` is O(n) in the string, but a loop that asks for it does not pay for it
 repeatedly: the optimizer hoists an invariant `len()` out of the loop (see
-[IR optimization](#how-the-binaries-get-small)), so `while i < len(s)` is a
+[How the binaries get small](#how-the-binaries-get-small)), so `while i < len(s)` is a
 linear scan. The hoist only happens when the loop cannot change the string.
 
 ### Arrays
@@ -467,10 +467,23 @@ three rectangles and moves one with the arrow keys or WASD. Both are described
 in the module headers.
 
 `Modules/tjson.tl` parses strict JSON into parallel-array nodes and exposes
-`json_parse`, `json_get`, `json_kind`, `json_text`, `json_count`, `json_child`,
-`json_key`, `json_value` and `json_emit`. It keeps number and string tokens as
-written, so a parse/emit round trip preserves `1.50` and escapes. Errors return
-`-1` with `json_error()` and `json_error_pos()` instead of exiting.
+`json_parse`, `json_get`, `json_pointer`, `json_kind`, `json_text`,
+`json_count`, `json_child`, `json_key`, `json_value` and `json_emit`. Object
+keys can be selected by dot syntax or by a quoted bracket such as `.["a.b"]`,
+and escaped keys are matched after decoding. Array indices may be negative.
+`json_pointer` resolves RFC 6901 pointers (`/users/0/name`, `/a~1b`,
+`/m~0n`). It keeps number and string tokens as written, so a parse/emit round
+trip preserves `1.50` and escapes; query output decodes non-ASCII escapes as
+UTF-8. Errors return `-1` with `json_error()` and `json_error_pos()` instead of
+exiting.
+
+The building side has `json_new_null`, `json_new_bool`, `json_new_int`,
+`json_new_number`, `json_new_string`, `json_new_array`, `json_new_object`,
+`json_array_push`/`set`/`remove`, and `json_object_set`/`remove`. Updates return
+the node to keep: a child run at the end of the link array is extended in
+place, otherwise a new node is allocated. `json_new_string` escapes text,
+`json_new_number` validates the JSON number grammar, and updates reject direct
+and indirect cycles. `json_parse` resets the shared arrays.
 `Modules/tzip.tl` reads and writes ZIP archives: `zip_open`/`zip_name`/
 `zip_size`/`zip_crc`/`zip_data`/`zip_extract`, and `zip_create`/`zip_add`/
 `zip_add_file`/`zip_finish`. Written entries are stored or DEFLATE-compressed,
@@ -745,10 +758,10 @@ with tcomp.
 | Program | Size | |
 |---|---|---|
 | `Programs/tbox.tl` | 6,767 B | `wc`, `head`, `tail`, `grep` in one binary |
-| `Programs/tjson.tl` | 15,474 B | JSON validate / pretty-print / query |
+| `Programs/tjson.tl` | 27,728 B | JSON validate / pretty-print / query |
 | `Programs/tbf.tl` | 4,464 B | a Brainfuck interpreter — a real bytecode VM |
-| `Programs/tchip8.tl` | 18,968 B | a CHIP-8 interpreter with terminal and X11 displays |
-| `Programs/tgameboy.tl` | 30,520 B | a Game Boy DMG CPU, joypad and background PPU |
+| `Programs/tchip8.tl` | 18,976 B | a CHIP-8 interpreter with terminal and X11 displays |
+| `Programs/tgameboy.tl` | 30,529 B | a Game Boy DMG CPU, joypad and background PPU |
 
 ### tbox — four tools, one binary
 
@@ -782,7 +795,19 @@ tbox.tl's output and exit behavior, but is not part of the tcomp build.
 ./tjson fmt package.json                # pretty-print, validating on the way
 ./tjson fmt --compact package.json      # one line, byte-identical to the input
 ./tjson get .dependencies.typescript package.json
+./tjson get '.["dependencies.typescript"]' package.json
+./tjson get --pointer /dependencies/typescript package.json
+./tjson get .tags[-1] package.json
 ./tjson keys .scripts package.json
+```
+
+Programs can also build documents with the same tree:
+
+```tlang
+let root = json_new_object()
+root = json_object_set(root, "name", json_new_string("tlang"))
+root = json_object_set(root, "items", json_new_array())
+json_emit(root, 1)   # {"name":"tlang","items":[]}
 ```
 
 A JSON document is a tree and tlang has no tagged unions, which is exactly the
@@ -799,7 +824,8 @@ Two decisions worth naming:
 * **Strings are stored raw** (still containing their escapes) and decoded only
   when `get` prints a value. `fmt` therefore reproduces the input byte for byte,
   and escapes that a tlang string cannot hold (`\b`, `\f`, `\uXXXX`) survive
-  formatting instead of being mangled.
+  formatting instead of being mangled. `get` and `keys` write decoded
+  non-ASCII escapes as UTF-8, including surrogate pairs such as U+1D11E.
 
 `Tests/programs_test.py` checks `fmt` against Python's `json.dumps` on 25
 generated documents, both pretty and compact — they are byte-identical.
@@ -1102,7 +1128,7 @@ overflow is a diagnostic, not memory corruption.
 ## Tests
 
 ```bash
-python3 Tests/version_test.py   # the compiler reports tcomp 1.4.0
+python3 Tests/version_test.py   # the compiler reports tcomp 1.5.0
 python3 Tests/run_tests.py      # golden output + exit status + binary size
 python3 Tests/programs_test.py  # tbox, against real arguments and real grep
 python3 Tests/c_test.py         # C -> tlang translations, against gcc
@@ -1282,14 +1308,24 @@ Kernel/               freestanding kernel: main.tl, kruntime.s, font8.s, mbr.s,
   instead (`tjson` decodes escapes this way).
 * `Modules/tjson.tl` handles up to 50,000 values, 200,000 child links and 200
   levels of nesting. `tbf` handles a 30,000-cell tape. These limits are `let`
-  constants at the top of the file.
+  constants at the top of the file. `json_pointer` follows RFC 6901, but tlang
+  strings are NUL-terminated, so a pointer or path containing U+0000 cannot
+  address a member, and URI-fragment percent-encoding is not decoded.
+  Duplicate object names are preserved but lookup selects the first member;
+  RFC 6901 leaves duplicate-name behavior undefined.
+* Building JSON shares the same 50,000-node and 200,000-link limits. Updates
+  return the node to keep and may extend in place or allocate a copy; direct
+  and indirect cycles are rejected. A value subtree deeper than 200 levels is
+  rejected, but total built depth is not otherwise checked, and `json_parse`
+  resets every node. Set/remove act on the first duplicate name.
 * `Modules/tport.tl` treats paths as bytes and does not normalise `..` or
   repeated slashes. `port_which` accepts any regular file with an executable
   bit; it does not apply `access(2)` or group/other identity checks.
   `port_run` inherits stdio and the environment but does not capture output.
-  `port_stdin` and `port_copy` use the 64 MB arena, so very large inputs are
-  still bounded by it, and `port_remove` removes only a file or an empty
-  directory.
+  `port_copy` rejects directories and other non-regular sources and checks the
+  copied byte count against the source size. `port_stdin` and `port_copy` use
+  the 64 MB arena, so very large inputs are still bounded by it, and
+  `port_remove` removes only a file or an empty directory.
 * `Modules/tzip.tl` writes stored (method 0) or DEFLATE (fixed Huffman with a
   bounded greedy 32K-window LZ77 search) entries, choosing the smaller form,
   with a fixed 1980-01-01 timestamp and UTF-8 names. Reading supports stored
@@ -1351,8 +1387,10 @@ Tools/selfhost.sh --verify       # stage 2 and stage 3 must be byte-identical
 The generated modules are checked in. After changing the runtime, the kind
 rule, builtin metadata or `VERSION`, rerun `Tools/gen_runtime.py`,
 `Tools/gen_kinds.py`, `Tools/gen_builtins.py` and `Tools/gen_version.py`;
-`selfhost.sh` refuses to build from stale generated files. A version bump now
-edits only `VERSION` and the changelog.
+`selfhost.sh` refuses to build from stale generated files. A version bump
+edits `VERSION` and the changelog, regenerates `Runtime/version_gen.tl`, and
+rebuilds `Tools/tcomp-seed` from `tcomp.tl` so stage 1 reports the release
+version. Then rerun `Tools/selfhost.sh --verify`.
 
 Keep changes scoped, run the checks that cover them, and update this README when
 a size, timing or test count changes. `taarch64` is built separately; its qemu

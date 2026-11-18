@@ -41,13 +41,9 @@ class CompileFailed(TlangError):
     """
 
 
-def compile_source(src, filename="<input>", opt=True, freestanding=False,
-                   entry="main", bounds=True):
-    """Return (assembly text, None) for inline source.
-
-    `opt` is accepted for older callers; the self-hosted compiler has no IR,
-    so optimization is not a separate mode.
-    """
+def compile_source(src, filename="<input>", freestanding=False, entry="main",
+                   bounds=True):
+    """Return (assembly text, None) for inline source."""
     workdir = tempfile.mkdtemp(prefix="tlang-src-")
     try:
         path = os.path.join(workdir, "input.tl")
@@ -60,7 +56,7 @@ def compile_source(src, filename="<input>", opt=True, freestanding=False,
         shutil.rmtree(workdir, ignore_errors=True)
 
 
-def compile_path(path, opt=True, freestanding=False, entry="main", bounds=True):
+def compile_path(path, freestanding=False, entry="main", bounds=True):
     """Compile a file (and its imports) with the checked-in seed compiler."""
     argv = [SEED]
     if freestanding:

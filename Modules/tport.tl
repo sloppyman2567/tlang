@@ -55,6 +55,9 @@ fn port_base(p: str) -> str {
   while start > 0 && p[start - 1] != 47 {
     start = start - 1
   }
+  if start == end && end == 1 && p[0] == 47 {
+    return "/"
+  }
   return slice(p, start, end - start)
 }
 
@@ -239,6 +242,7 @@ fn port_shell(command: str) -> int {
 # once a NUL is present; the caller reads it with `file_size` when it came from
 # a file, or tracks the count it wrote.
 fn port_read_fd(fd: int) -> str {
+  PORT_ERR = ""
   let cap = 65536
   let buf = newbuf(cap)
   let used = 0
@@ -249,6 +253,11 @@ fn port_read_fd(fd: int) -> str {
       cap = next
     }
     let n = fd_read(fd, str_offset(buf, used), 65536)
+    if n < 0 {
+      free(buf)
+      port_fail("read failed")
+      return ""
+    }
     used = used + n
     if n < 65536 {
       break
@@ -267,7 +276,11 @@ fn port_stdin() -> str {
 
 # Write exactly n bytes and report whether all of them went out.
 fn port_write(fd: int, data: str, n: int) -> int {
-  if n <= 0 {
+  if n < 0 {
+    port_fail("negative length")
+    return 0
+  }
+  if n == 0 {
     return 1
   }
   if fd_write(fd, data, n) == n {
@@ -286,6 +299,16 @@ fn port_copy(src: str, dst: str) -> int {
     port_fail("source and destination are the same: " + src)
     return 0
   }
+  let src_mode = file_mode(src)
+  if src_mode < 0 {
+    port_fail("cannot stat " + src)
+    return 0
+  }
+  if (src_mode & 61440) != 32768 {
+    port_fail("not a regular file: " + src)
+    return 0
+  }
+  let src_size = file_size(src)
   let from = open_fd(src, 0)
   if from < 0 {
     port_fail("cannot open " + src)
@@ -298,28 +321,36 @@ fn port_copy(src: str, dst: str) -> int {
     return 0
   }
   let buf = newbuf(65536)
+  let copied = 0
   let ok = 1
   while 1 == 1 {
     let n = fd_read(from, buf, 65536)
-    if n <= 0 {
+    if n < 0 {
+      ok = 0
+      port_fail("read failed: " + src)
       break
     }
+    if n == 0 {
+      break
+    }
+    copied = copied + n
     if fd_write(to, buf, n) != n {
       ok = 0
+      port_fail("write failed: " + dst)
       break
     }
   }
   close_fd(from)
   close_fd(to)
+  if ok == 1 && src_size >= 0 && copied != src_size {
+    ok = 0
+    port_fail("short read: " + src)
+  }
   if ok == 0 {
     unlink(dst)
-    port_fail("write failed: " + dst)
     return 0
   }
-  let mode = file_mode(src)
-  if mode >= 0 {
-    chmod(dst, mode & 4095)
-  }
+  chmod(dst, src_mode & 4095)
   return 1
 }
 

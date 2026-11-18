@@ -17,9 +17,9 @@ import tempfile
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 TCOMP = os.path.join(ROOT, "tcomp")
 CASES = os.path.join(ROOT, "Tests", "Cases")
-# Deliberately tight: hello world is 321 bytes, and a regression that brought
-# back the assembler note and its two program headers (162 bytes) must not
-# slip through.
+# Deliberately tight: hello world is 363 bytes, and a regression that brought
+# back the assembler note and its two program headers (about 160 bytes) must
+# not slip through.
 SIZE_LIMIT = 400
 
 
