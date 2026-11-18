@@ -4,6 +4,42 @@ All notable changes to tlang and tcomp are recorded here. The compiler and the
 language share one version, reported by `tcomp --version` and kept in sync by
 `Tests/version_test.py`.
 
+## Unreleased
+
+### License
+
+- The project is released into the public domain under the Unlicense; see
+  `UNLICENSE`.
+
+### Added
+
+- `Modules/tjson.tl`: a reusable JSON parser, tree accessor API and
+  pretty/compact emitter. `Programs/tjson.tl` now imports it instead of
+  carrying its own copy, and parsing rejects leading zeroes, incomplete
+  fractions or exponents, raw control characters and unknown escapes.
+- `Modules/tzip.tl`: ZIP archives with CRC-32. `zip_open` reads central
+  directories and `zip_data`/`zip_extract` decompress stored and deflated
+  entries, including both fixed and dynamic Huffman blocks. The writer picks
+  stored or DEFLATE compression per entry, so repetitive files shrink without
+  making incompressible or empty files larger.
+- `Modules/tport.tl`: portable command-line helpers for paths, `PATH` lookup,
+  process launch, stdin, binary file copy/move and recursive directory
+  creation. `port_run` inherits the caller's environment and returns a
+  shell-style status.
+- `Tests/stdlib_test.py`: JSON and ZIP differential tests against Python's
+  `json` and `zipfile` modules in both compilers, including compressed, binary,
+  empty and UTF-8-named entries, large archives and writer round trips.
+- `Tests/portability_test.py`: exercises the portable module in both compilers,
+  including a 70 KB stdin read and a child process that checks its inherited
+  environment.
+
+### Changed
+
+- `exec` now passes the caller's environment to the new program instead of an
+  empty environment. A portable tool launched with `exec` keeps `PATH`, `HOME`
+  and locale settings. The self-hosted compiler captures `argc/argv` when a
+  program calls `exec`, since that is where `envp` starts.
+
 ## 1.4.0
 
 ### Added

@@ -166,6 +166,8 @@ PROBE_SRC = '''fn main() {
     print(argv(i))
     print(",")
   }
+  print(" ")
+  print(env("TL_EXEC_ENV"))
   print("\\n")
 }
 '''
@@ -325,8 +327,9 @@ def main():
                 failures.append(f"{label}: WNOHANG {got.stdout!r}")
 
             got = subprocess.run([dirty_exe, probe], capture_output=True,
-                                 text=True, timeout=20)
-            if (got.returncode, got.stdout) != (0, "4 echo,hello,from,exec,\n"):
+                                 text=True, timeout=20,
+                                 env={**os.environ, "TL_EXEC_ENV": "inherited"})
+            if (got.returncode, got.stdout) != (0, "4 echo,hello,from,exec, inherited\n"):
                 failures.append(f"{label}: dirty exec {got.stdout!r}")
 
             five = [os.path.join(work, f"five-{label}-{i}") for i in range(5)]

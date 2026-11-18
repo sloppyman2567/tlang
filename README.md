@@ -40,9 +40,9 @@ Measured on x86-64 Linux with binutils 2.47:
 | primes, first 20 (functions, loops, calls) | 642 B |
 | words (stdin, `read_file`, `argv`) | 1,572 B |
 | **tbox** (four tools: `wc`, `head`, `tail`, `grep`) | **6,767 B** |
-| **tjson** (JSON validate, format, query) | 13,385 B |
+| **tjson** (JSON validate, format, query) | 15,474 B |
 | **tbf** (Brainfuck interpreter) | 4,464 B |
-| tcomp, the whole compiler | 203,027 B |
+| tcomp, the whole compiler | 203,157 B |
 | *for comparison:* hello world in C, `gcc -Os -s` | 14,472 B |
 | *for comparison:* `grep` + `wc` + `head` + `tail` from coreutils | 437 KB |
 
@@ -59,7 +59,8 @@ syscalls and `ld` writes a single read/execute segment.
 [Programs](#programs) · [taarch64](#taarch64-an-aarch64-interpreter) ·
 [C to tlang](#c-to-tlang) · [How the binaries get small](#how-the-binaries-get-small) ·
 [Architecture](#architecture) · [Tests](#tests) · [Layout](#layout) ·
-[Known limitations](#known-limitations) · [Contributing](#contributing)
+[Known limitations](#known-limitations) · [Contributing](#contributing) ·
+[License](#license)
 
 ---
 
@@ -88,12 +89,12 @@ Tools/selfhost.sh --verify     # builds Build/tcomp and proves the fixed point
 
 ```
 stage 1: checked-in seed compiler (Tools/tcomp-seed)
-  seed: 203027 bytes
+  seed: 203157 bytes
 stage 2: tcomp.tl -> Build/tcomp (via the seed)
-  Build/tcomp: 203027 bytes
+  Build/tcomp: 203157 bytes
 stage 3: tcomp.tl -> Build/tcomp2 (via stage 2)
 stage 4: tcomp.tl -> Build/tcomp3 (via stage 3)
-fixed point: stage 2 and stage 3 are identical (203027 bytes)
+fixed point: stage 2 and stage 3 are identical (203157 bytes)
 ```
 
 `Build/tcomp` emits assembly on stdout:
@@ -465,6 +466,23 @@ keyboard and pointer input through `tw_poll` (`TW_KEY`, `TW_MOUSE_X`,
 three rectangles and moves one with the arrow keys or WASD. Both are described
 in the module headers.
 
+`Modules/tjson.tl` parses strict JSON into parallel-array nodes and exposes
+`json_parse`, `json_get`, `json_kind`, `json_text`, `json_count`, `json_child`,
+`json_key`, `json_value` and `json_emit`. It keeps number and string tokens as
+written, so a parse/emit round trip preserves `1.50` and escapes. Errors return
+`-1` with `json_error()` and `json_error_pos()` instead of exiting.
+`Modules/tzip.tl` reads and writes ZIP archives: `zip_open`/`zip_name`/
+`zip_size`/`zip_crc`/`zip_data`/`zip_extract`, and `zip_create`/`zip_add`/
+`zip_add_file`/`zip_finish`. Written entries are stored or DEFLATE-compressed,
+whichever is smaller, with a standard CRC-32. Reading supports stored entries
+and deflated entries with fixed or dynamic Huffman blocks.
+`Modules/tport.tl` holds the portable command-line layer: `port_base`,
+`port_dir`, `port_ext`, `port_join`, `port_which`, `port_run`, `port_shell`,
+`port_stdin`, `port_write`, `port_copy`, `port_move`, `port_mkdir_p` and
+`port_remove`. It searches `PATH`, checks executable bits, inherits the
+caller's environment when launching a child, reads stdin to EOF, and copies
+files without loading them whole. The module headers document their limits.
+
 ### Builtins
 
 | Call | Effect |
@@ -510,7 +528,7 @@ in the module headers.
 | `getuid()`, `geteuid()`, `getgid()`, `getegid()` | process identity |
 | `mmap(n)`, `munmap(p, n)`, `mprotect(p, n, prot)` | anonymous byte mappings, `0` on failure; `prot` uses Linux `PROT_*` |
 | `tcp_connect(ip, port)`, `tcp_listen(port)`, `tcp_accept(fd)` | blocking TCP over numeric IPv4; ports are 1–65535 |
-| `fork()`, `exec(path, argv)`, `waitpid(pid, opts)` | process creation, replacement and reaping; `waitpid` returns the raw wait status |
+| `fork()`, `exec(path, argv)`, `waitpid(pid, opts)` | process creation, replacement and reaping; `exec` inherits the environment and `waitpid` returns the raw wait status |
 | `pipe(fds)`, `dup2(old, new)`, `kill(pid, sig)`, `getppid()` | pipes, descriptor aliasing, signals and parent pid |
 | `sock(path)` | connect a Unix socket; used by the X11 client and the Wayland module |
 | `fd_read(fd, buf, n)`, `fd_write(fd, buf, n)` | binary read/write of `n` bytes, retrying short transfers |
@@ -577,8 +595,9 @@ on success.
 Processes are deliberately thin wrappers over the syscalls. `fork` returns
 `0` in the child and the child pid in the parent. `exec(path, argv)` takes an
 array of strings (at most 128 — a longer array fails with `-1` rather than
-being silently truncated) and does not return on success; the empty
-environment is passed. `waitpid(pid, opts)` returns the **raw wait status**:
+being silently truncated) and does not return on success; the caller's
+environment is passed through unchanged, so a launched tool keeps `PATH`,
+`HOME` and locale. `waitpid(pid, opts)` returns the **raw wait status**:
 `(status & 127) == 0` means a normal exit, `(status >> 8) & 255` is the exit
 code, and a nonzero low byte means the child was signalled. `pipe(fds)` writes
 the read and write descriptors into slots 0 and 1 of a two-element int array.
@@ -726,7 +745,7 @@ with tcomp.
 | Program | Size | |
 |---|---|---|
 | `Programs/tbox.tl` | 6,767 B | `wc`, `head`, `tail`, `grep` in one binary |
-| `Programs/tjson.tl` | 13,385 B | JSON validate / pretty-print / query |
+| `Programs/tjson.tl` | 15,474 B | JSON validate / pretty-print / query |
 | `Programs/tbf.tl` | 4,464 B | a Brainfuck interpreter — a real bytecode VM |
 | `Programs/tchip8.tl` | 18,968 B | a CHIP-8 interpreter with terminal and X11 displays |
 | `Programs/tgameboy.tl` | 30,520 B | a Game Boy DMG CPU, joypad and background PPU |
@@ -1104,6 +1123,7 @@ python3 Tests/sourcemap_test.py # imported-file errors name the imported file
 python3 Tests/bounds_test.py    # checked indexing and runtime safety guards
 python3 Tests/io_test.py        # file output and the no-print dependency
 python3 Tests/modules_test.py   # recursive imports
+python3 Tests/stdlib_test.py    # JSON and ZIP modules against Python
 python3 Tests/wayland_test.py   # Wayland input against a fake compositor
 python3 Tests/floats_test.py    # float arithmetic, casting, math and printing
 python3 Tests/gameboy_test.py   # Game Boy CPU/PPU parity
@@ -1131,6 +1151,7 @@ these numbers are not a SIMD or transcendental-function benchmark.
 
 ```
 VERSION               the release version, single source of truth
+UNLICENSE             public-domain dedication for the whole project
 tcomp                 CLI: build / run / --asm / version
 tcomp.tl              the compiler, in tlang
 tlang-icon.svg/.png   project icon (SVG source and 256px PNG)
@@ -1170,6 +1191,7 @@ Tests/sourcemap_test.py imported-file diagnostics name the imported file
 Tests/bounds_test.py  checked indexing and runtime safety guards
 Tests/io_test.py      file output and self-hosted dependency checks
 Tests/modules_test.py recursive import behaviour
+Tests/stdlib_test.py  JSON and ZIP modules against Python's json and zipfile
 Tests/wayland_test.py twayland keyboard/pointer events against a fake compositor
 Tests/floats_test.py  floating-point behaviour
 Tests/gameboy_test.py Game Boy CPU and PPU parity
@@ -1181,6 +1203,7 @@ Tests/Wayland/        twayland input program driven by the fake compositor
 Examples/             hello, fib, fizzbuzz, primes, guess, words, tchip8-demo.ch8,
                       tgameboy-demo.gb, tgameboy-pong.gb, tgameboy-art.gb,
                       tgameboy-screen.gb
+Modules/              twayland, tjson, tzip and tport: importable modules
 Programs/             tbox, tjson, tbf, tchip8, tgameboy: real programs, not demos
 Programs/tbox.c       hosted C equivalent of tbox, for comparison
 taarch64/             user-mode AArch64 interpreter for static binaries
@@ -1257,8 +1280,23 @@ Kernel/               freestanding kernel: main.tl, kruntime.s, font8.s, mbr.s,
   `\\`, `\0` and `\e` are available in literals, but there is no way to build a
   string containing (say) byte 8 at runtime — print it with `print_char`
   instead (`tjson` decodes escapes this way).
-* `tjson` handles up to 50,000 values and `tbf` a 30,000-cell tape; both limits
-  are `let` constants at the top of the file.
+* `Modules/tjson.tl` handles up to 50,000 values, 200,000 child links and 200
+  levels of nesting. `tbf` handles a 30,000-cell tape. These limits are `let`
+  constants at the top of the file.
+* `Modules/tport.tl` treats paths as bytes and does not normalise `..` or
+  repeated slashes. `port_which` accepts any regular file with an executable
+  bit; it does not apply `access(2)` or group/other identity checks.
+  `port_run` inherits stdio and the environment but does not capture output.
+  `port_stdin` and `port_copy` use the 64 MB arena, so very large inputs are
+  still bounded by it, and `port_remove` removes only a file or an empty
+  directory.
+* `Modules/tzip.tl` writes stored (method 0) or DEFLATE (fixed Huffman with a
+  bounded greedy 32K-window LZ77 search) entries, choosing the smaller form,
+  with a fixed 1980-01-01 timestamp and UTF-8 names. Reading supports stored
+  and deflated entries with fixed or dynamic Huffman blocks; ZIP64, encryption,
+  split archives and methods other than 0 and 8 are rejected. Archives are
+  limited to 256 entries and 4 GiB per entry, and the whole file is read into
+  memory because `read_file` does not stream.
 * Integer division by zero raises SIGFPE.
 * At most 6 function parameters.
 * Type tracking is syntactic. A return without a `-> type` annotation is
@@ -1287,6 +1325,14 @@ Kernel/               freestanding kernel: main.tl, kruntime.s, font8.s, mbr.s,
   mode (K2 onwards). Every app runs in ring 0 inside the one address space, and
   a buffer's address has to be coerced with `| 0` to reach a machine builtin,
   because a buffer is not accepted where an integer is wanted.
+
+---
+
+## License
+
+This project is released into the public domain under the
+[Unlicense](UNLICENSE). You can use, modify, and redistribute it for any
+purpose, with no warranty.
 
 ---
 

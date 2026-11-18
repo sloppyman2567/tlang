@@ -74,6 +74,7 @@ python3 Tests/env_test.py        # environment lookup
 python3 Tests/bounds_test.py     # checked indexing and runtime guards
 python3 Tests/portability_test.py     # common Linux builtins
 python3 Tests/linux_extra_test.py     # directory, metadata and process builtins
+python3 Tests/stdlib_test.py     # JSON and ZIP modules against Python
 Tools/selfhost.sh --verify       # stages 2 and 3 must be byte-identical
 ```
 

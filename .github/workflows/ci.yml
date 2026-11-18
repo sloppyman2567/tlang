@@ -39,6 +39,7 @@ jobs:
           python3 Tests/linux_stress_test.py
           python3 Tests/floats_test.py
           python3 Tests/modules_test.py
+          python3 Tests/stdlib_test.py
       - name: Programs and C translator
         run: |
           python3 Tests/programs_test.py

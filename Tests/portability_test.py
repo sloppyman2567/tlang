@@ -15,6 +15,7 @@ import tempfile
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 TCOMP = os.path.join(ROOT, "tcomp")
+PORT_MODULE = os.path.join(ROOT, "Modules", "tport.tl")
 LDFLAGS = ["-s", "-z", "noseparate-code", "--build-id=none"]
 sys.path.insert(0, ROOT)
 
@@ -63,6 +64,92 @@ FD_SRC = '''fn main() {
   print("\\n")
 }
 '''
+
+PORT_SRC = '''import "@MODULE@"
+
+fn main() {
+  print_int(port_is_abs("/x"))
+  print(" ")
+  print(port_base("/a/b/"))
+  print(" ")
+  print(port_dir("/a/b"))
+  print(" ")
+  print(port_ext("a.tar.gz"))
+  print(" ")
+  print(port_join("a/", "b"))
+  print(" ")
+  print_int(len(port_which("sh")) > 0)
+  print(" ")
+  print_int(len(port_which("tlang-no-such-command")) == 0)
+  print("\\n")
+
+  let root = argv(1)
+  if port_mkdir_p(root + "/a/b") == 0 { print(port_error()) exit(1) }
+  print_int(is_dir(root + "/a/b"))
+  print(" ")
+  let data = newbuf(5)
+  data[0] = 0
+  data[1] = 1
+  data[2] = 255
+  data[3] = 65
+  data[4] = 66
+  let fd = open_fd(root + "/src.bin", 1 | 64 | 512)
+  fd_write(fd, data, 5)
+  close_fd(fd)
+  print_int(port_copy(root + "/src.bin", root + "/copy.bin"))
+  print(" ")
+  print_int(file_size(root + "/copy.bin"))
+  print(" ")
+  let got = read_file(root + "/copy.bin")
+  print_int(ld8(got, 0) == 0 && ld8(got, 2) == 255)
+  print(" ")
+  print_int(port_move(root + "/copy.bin", root + "/moved.bin"))
+  print(" ")
+  print_int(file_exists(root + "/moved.bin") && file_exists(root + "/copy.bin") == 0)
+  print(" ")
+  print_int(port_remove(root + "/moved.bin"))
+  print(" ")
+  print_int(port_remove(root + "/src.bin"))
+  print(" ")
+  let big = newbuf(150000)
+  let i = 0
+  while i < 150000 {
+    big[i] = i & 255
+    i = i + 1
+  }
+  let bfd = open_fd(root + "/big.bin", 1 | 64 | 512)
+  fd_write(bfd, big, 150000)
+  close_fd(bfd)
+  print_int(port_copy(root + "/big.bin", root + "/big-copy.bin"))
+  print(" ")
+  print_int(file_size(root + "/big-copy.bin"))
+  print(" ")
+  let bg = read_file(root + "/big-copy.bin")
+  print_int(ld8(bg, 0) == 0 && ld8(bg, 65536) == 0 && ld8(bg, 149999) == 239)
+  print(" ")
+  print_int(port_remove(root + "/big.bin"))
+  print(" ")
+  print_int(port_remove(root + "/big-copy.bin"))
+  print(" ")
+  print_int(port_remove(root + "/a/b"))
+  print(" ")
+  print_int(port_remove(root + "/a"))
+  print(" ")
+  let args = alloc(3, str)
+  args[0] = "sh"
+  args[1] = "-c"
+  args[2] = "exit 7"
+  print_int(port_run(args))
+  print(" ")
+  args[2] = "test x$TL_PORT_ENV = xinherited"
+  print_int(port_run(args) == 0)
+  print(" ")
+  print_int(len(port_stdin()))
+  print("\\n")
+}
+'''.replace("@MODULE@", PORT_MODULE)
+
+PORT_WANT = b"1 b /a .gz a/b 1 1\n1 1 5 1 1 1 1 1 1 150000 1 1 1 1 1 7 1 70000\n"
 
 BAD_ARGS = (
     ('fn main() { now(1) }', 'now'),
@@ -130,6 +217,7 @@ def main():
             time_exe = build(TIME_SRC, compiler, work, "time-" + label)
             fs_exe = build(FS_SRC, compiler, work, "fs-" + label)
             fd_exe = build(FD_SRC, compiler, work, "fd-" + label)
+            port_exe = build(PORT_SRC, compiler, work, "port-" + label)
 
             got = subprocess.run([time_exe], cwd=work, capture_output=True,
                                  text=True)
@@ -150,6 +238,15 @@ def main():
             got = subprocess.run([fd_exe, out], capture_output=True, text=True)
             if (got.returncode, got.stdout) != (0, "1 3 0 1\n"):
                 failures.append(f"{label}: fd {got.returncode} {got.stdout!r}")
+
+            port_dir = os.path.join(work, "tport-" + label)
+            got = subprocess.run([port_exe, port_dir], input=b"x" * 70000,
+                                 env={**os.environ, "TL_PORT_ENV": "inherited"},
+                                 capture_output=True)
+            if (got.returncode, got.stdout) != (0, PORT_WANT):
+                failures.append(
+                    f"{label}: tport {got.returncode} {got.stdout!r} "
+                    f"{got.stderr!r}")
 
             check_rejections(compiler, failures, label, work)
             if not any(f.startswith(label) for f in failures):

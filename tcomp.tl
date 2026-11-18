@@ -5269,6 +5269,11 @@ fn scan_needs_args() {
         U_ARGC = 1
         U_ARGV = 1
       }
+      # exec() passes envp from that capture through to the child.
+      if str_eq(TV[i], "exec") == 1 {
+        U_ARGC = 1
+        U_ARGV = 1
+      }
     }
     i = i + 1
   }

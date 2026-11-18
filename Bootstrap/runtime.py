@@ -2334,10 +2334,11 @@ RUNTIME = {
         [],
     ),
     # Process control, all one syscall per helper.  exec marshals at most 128
-    # string pointers on the stack (NULL-terminated argv, empty envp); on
-    # success it never returns.  waitpid returns the raw status: bit 7 is set
-    # for a signal, bits 8..15 hold the exit code.  pipe writes the two fds
-    # into slots 0 and 1 of a caller-supplied array, which must have length>=2.
+    # string pointers on the stack and passes the caller's environment through
+    # unchanged, so a launched tool keeps PATH, HOME and locale.  On success it
+    # never returns.  waitpid returns the raw status: bit 7 is set for a signal,
+    # bits 8..15 hold the exit code.  pipe writes the two fds into slots 0 and 1
+    # of a caller-supplied array, which must have length>=2.
     "fork": (
         """__t_fork:
   mov eax, 57
@@ -2370,8 +2371,9 @@ RUNTIME = {
   jmp .Lt_exec_copy
 .Lt_exec_done:
   mov qword ptr [rsp + rcx*8], 0
-  lea rdx, [rsp + 1032]
-  mov qword ptr [rdx], 0
+  mov rax, [rip + __t_argc_val]
+  mov rdx, [rip + __t_argv_val]
+  lea rdx, [rdx + rax*8 + 8]
   mov rdi, rbx
   mov rsi, rsp
   mov eax, 59
@@ -2382,7 +2384,7 @@ RUNTIME = {
   pop r12
   pop rbx
   ret""",
-        [],
+        ["args"],
     ),
     "chdir": (
         """__t_chdir:
